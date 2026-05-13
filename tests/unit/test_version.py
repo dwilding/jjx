@@ -1,4 +1,4 @@
-from jetty import _version
+from jjx import _version
 
 
 def test_version_exists():
