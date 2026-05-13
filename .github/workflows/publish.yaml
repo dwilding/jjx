@@ -13,7 +13,7 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    environment: publish-jetty
+    environment: publish-jjx
     steps:
       - uses: actions/checkout@v6
         with:

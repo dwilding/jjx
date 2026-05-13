@@ -1,5 +1,5 @@
-import jetty
+import jjx
 
 
 def test_exports_version():
-    assert jetty.__version__
+    assert jjx.__version__
