@@ -1,6 +1,7 @@
 import pathlib
 import shutil
 import subprocess
+import tempfile
 
 import pytest
 
@@ -13,6 +14,16 @@ def charm_dir_params():
 @pytest.fixture(params=charm_dir_params())
 def charm_dir(request):
     return request.param
+
+
+@pytest.fixture(scope="module", autouse=True)
+def test_dir(package_dir):
+    root = package_dir / ".tmp"
+    root.mkdir(parents=True, exist_ok=True)
+    path = pathlib.Path(tempfile.mkdtemp(dir=root))
+    (path / ".gitignore").write_text("*\n")
+    yield path
+    shutil.rmtree(path, ignore_errors=True)
 
 
 @pytest.fixture(autouse=True)
@@ -32,7 +43,8 @@ def system_ready():
     assert result.returncode == 0, result.stderr.strip() or "cannot access docker daemon"
 
 
-def test_charm(package_dir, charm_dir, test_dir):
+def test_charm(package_dir, charm_dir, request):
+    test_dir = request.getfixturevalue("test_dir")
     working_dir = test_dir / charm_dir.name
     shutil.copytree(charm_dir, working_dir)
     (working_dir / "placeholder.charm").touch()  # "Pack" the charm.
