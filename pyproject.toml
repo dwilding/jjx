@@ -1,0 +1,31 @@
+[project]
+name = "jetty"
+version = "0.1.0"
+description = "A Juju simulator that can deploy simple K8s charms on Docker."
+authors = [
+    { name = "Dave Wilding", email = "tech@dpw.me" },
+]
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">= 3.10"
+dependencies = []
+
+[project.scripts]
+juju = "jetty._cli:main"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.12,<1",
+    "pytest>=9,<10",
+    "ty>=0.0.35,<1",
+    "zizmor>=1,<2",
+]
+
+[build-system]
+requires = [
+    "uv_build>=0.11.14,<1",
+]
+build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 99
