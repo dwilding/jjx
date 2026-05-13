@@ -29,3 +29,8 @@ build-backend = "uv_build"
 
 [tool.ruff]
 line-length = 99
+
+[tool.pytest.ini_options]
+norecursedirs = [
+    "tests/functional/charms",
+]
