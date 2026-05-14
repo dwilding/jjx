@@ -35,9 +35,6 @@ GITIGNORE_FILE_NAME = ".gitignore"
 PEBBLE_RELEASES_API = "https://api.github.com/repos/canonical/pebble/releases/latest"
 PEBBLE_RELEASES_DOWNLOAD = "https://github.com/canonical/pebble/releases/download/{tag}/{asset}"
 
-JJX_MODEL_ENV = "JJX_MODEL"
-JJX_APP_ENV = "JJX_APP"
-JJX_PROJECT_ROOT_ENV = "JJX_PROJECT_ROOT"
 JJX_CACHED_PEBBLE_BIN_ENV = "JJX_CACHED_PEBBLE_BIN"
 
 
@@ -54,10 +51,11 @@ def _now_iso() -> str:
 
 
 def _project_root() -> Path:
-    env_root = os.environ.get(JJX_PROJECT_ROOT_ENV)
-    if env_root:
-        return Path(env_root).resolve()
-    return Path.cwd().resolve()
+    cwd = Path.cwd().resolve()
+    for candidate in (cwd, *cwd.parents):
+        if (candidate / STATE_DIR_NAME / STATE_FILE_NAME).exists():
+            return candidate
+    return cwd
 
 
 def _jjx_dir() -> Path:
@@ -507,9 +505,6 @@ def _build_charm_env(
             "JUJU_UNIT_NAME": unit_name,
             "JUJU_VERSION": "3.6.0",
             "JUJU_CHARM_DIR": charm_root,
-            JJX_MODEL_ENV: model_name,
-            JJX_APP_ENV: app_name,
-            JJX_PROJECT_ROOT_ENV: str(_project_root()),
         }
     )
 

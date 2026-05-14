@@ -13,12 +13,11 @@ from . import _engine
 
 
 def _tool_context() -> tuple[dict[str, Any], str, str, dict[str, Any], dict[str, Any]]:
-    model_name = os.environ.get(_engine.JJX_MODEL_ENV) or os.environ.get("JUJU_MODEL_NAME")
-    app_name = os.environ.get(_engine.JJX_APP_ENV)
-    if not app_name:
-        unit_name = os.environ.get("JUJU_UNIT_NAME", "")
-        if "/" in unit_name:
-            app_name = unit_name.split("/", 1)[0]
+    model_name = os.environ.get("JUJU_MODEL_NAME")
+    app_name = None
+    unit_name = os.environ.get("JUJU_UNIT_NAME", "")
+    if "/" in unit_name:
+        app_name = unit_name.split("/", 1)[0]
 
     state = _engine._load_state()
     models = state.get("models", {})
