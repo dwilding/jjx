@@ -16,6 +16,32 @@ jobs:
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
       - name: Install bubblewrap
         run: sudo apt-get install -y bubblewrap
+      - name: Configure AppArmor policy for bubblewrap
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get install -y apparmor apparmor-utils
+
+          BWRAP_PATH="$(command -v bwrap)"
+          sudo tee /etc/apparmor.d/jjx-bwrap >/dev/null <<EOF
+          abi <abi/4.0>,
+          include <tunables/global>
+
+          profile jjx-bwrap ${BWRAP_PATH} flags=(unconfined) {
+            userns,
+
+            # Site-specific additions and overrides.
+            include if exists <local/jjx-bwrap>
+          }
+          EOF
+
+          sudo apparmor_parser -r /etc/apparmor.d/jjx-bwrap
+
+          if ! bwrap --ro-bind / / --dev /dev --proc /proc -- true; then
+            echo "bubblewrap still blocked after profile load; trying kernel.unprivileged_userns_clone=1"
+            sudo sysctl -w kernel.unprivileged_userns_clone=1
+            bwrap --ro-bind / / --dev /dev --proc /proc -- true
+          fi
       - name: Diagnostic preflight
         shell: bash
         run: |
@@ -31,6 +57,11 @@ jobs:
           command -v uvx || true
           command -v docker || true
           command -v bwrap || true
+          aa-status | sed -n '1,120p' || true
+          sudo cat /etc/apparmor.d/jjx-bwrap || true
+          sysctl kernel.apparmor_restrict_unprivileged_userns || true
+          sysctl kernel.unprivileged_userns_clone || true
+          bwrap --ro-bind / / --dev /dev --proc /proc -- true || true
           python --version || true
           uv --version || true
           uvx --version || true
