@@ -38,6 +38,7 @@ PEBBLE_RELEASES_DOWNLOAD = "https://github.com/canonical/pebble/releases/downloa
 JJX_MODEL_ENV = "JJX_MODEL"
 JJX_APP_ENV = "JJX_APP"
 JJX_PROJECT_ROOT_ENV = "JJX_PROJECT_ROOT"
+JJX_CACHED_PEBBLE_BIN_ENV = "JJX_CACHED_PEBBLE_BIN"
 
 
 @dataclass
@@ -280,9 +281,21 @@ def _docker_list_model_containers(model_name: str) -> list[str]:
 
 
 def _resolve_pebble_binary() -> Path:
-    cache_path = _jjx_dir() / "bin" / "pebble"
-    if cache_path.exists():
-        return cache_path
+    local_cache_path = _jjx_dir() / "bin" / "pebble"
+    if local_cache_path.exists():
+        return local_cache_path
+
+    # Check for external cache directory via environment variable
+    external_cache_dir = os.environ.get(JJX_CACHED_PEBBLE_BIN_ENV)
+    external_cache_path = None
+    if external_cache_dir:
+        external_cache_path = Path(external_cache_dir)
+        if external_cache_path.exists():
+            # Copy from external cache to local cache
+            local_cache_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(external_cache_path, local_cache_path)
+            local_cache_path.chmod(0o755)
+            return local_cache_path
 
     arch_map = {
         "x86_64": "amd64",
@@ -321,7 +334,10 @@ def _resolve_pebble_binary() -> Path:
     if not download_url:
         raise CliError(f"pebble asset has no download URL: {asset_name}")
 
-    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    # Determine where to download to: external cache if configured, otherwise local
+    download_path = external_cache_path if external_cache_path else local_cache_path
+    download_path.parent.mkdir(parents=True, exist_ok=True)
+
     try:
         request = Request(download_url, headers={"User-Agent": "jjx"})
         with urlopen(request, timeout=60) as response:
@@ -340,12 +356,19 @@ def _resolve_pebble_binary() -> Path:
                 extracted = archive.extractfile(member)
                 if extracted is None:
                     raise CliError(f"failed to extract pebble binary from {asset_name}")
-                cache_path.write_bytes(extracted.read())
+                download_path.write_bytes(extracted.read())
     except (HTTPError, URLError, TimeoutError, tarfile.TarError, OSError) as exc:
         raise CliError(f"failed to download pebble: {exc}") from None
 
-    cache_path.chmod(0o755)
-    return cache_path
+    download_path.chmod(0o755)
+
+    # If we downloaded to external cache, copy to local cache
+    if external_cache_path and external_cache_path != local_cache_path:
+        local_cache_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(download_path, local_cache_path)
+        local_cache_path.chmod(0o755)
+
+    return local_cache_path
 
 
 def _staged_pebble_binary(pebble_binary: Path) -> Path:
