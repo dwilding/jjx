@@ -81,7 +81,7 @@ def deploy(args: list[str], model: str | None) -> int:
     model_state = state["models"][model_name]
 
     charm_path, app_name, resources = _parse_deploy_args(args)
-    image = resources.get("httpbin-image") or resources.get("image")
+    image = resources.get("httpbin-image")
     if not image:
         raise _engine.CliError("missing required --resource httpbin-image=<image>")
 

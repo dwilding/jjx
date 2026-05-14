@@ -376,7 +376,7 @@ def _staged_pebble_binary(pebble_binary: Path) -> Path:
     Staging in ``/tmp`` keeps the mount path simple and stable.
     """
 
-    cache_root = Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache")))
+    cache_root = Path.home() / ".cache"
     staged = cache_root / "jjx" / f"pebble-{os.getuid()}"
     staged.parent.mkdir(parents=True, exist_ok=True)
     if staged.exists() and staged.is_file():
