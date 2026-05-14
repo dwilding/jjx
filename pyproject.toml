@@ -1,7 +1,7 @@
 [project]
 name = "jjx"
 version = "0.2.0"
-description = "A Juju simulator that can deploy simple K8s charms on Docker."
+description = "A Juju test adapter for simple Kubernetes charms on Docker."
 authors = [
     { name = "Dave Wilding", email = "tech@dpw.me" },
 ]
