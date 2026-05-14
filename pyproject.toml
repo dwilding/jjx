@@ -1,6 +1,6 @@
 [project]
 name = "jjx"
-version = "0.1.0"
+version = "0.2.0"
 description = "A Juju simulator that can deploy simple K8s charms on Docker."
 authors = [
     { name = "Dave Wilding", email = "tech@dpw.me" },
@@ -8,7 +8,9 @@ authors = [
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">= 3.10"
-dependencies = []
+dependencies = [
+    "PyYAML>=6,<7",
+]
 
 [project.scripts]
 juju = "jjx._cli:main"
@@ -29,3 +31,16 @@ build-backend = "uv_build"
 
 [tool.ruff]
 line-length = 99
+extend-exclude = [
+    "tests/functional/charms",
+]
+
+[tool.ty.src]
+exclude = [
+    "tests/functional/charms",
+]
+
+[tool.pytest.ini_options]
+norecursedirs = [
+    "tests/functional/charms",
+]
