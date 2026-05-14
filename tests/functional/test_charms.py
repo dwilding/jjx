@@ -23,7 +23,7 @@ def test_dir(package_dir):
     path = pathlib.Path(tempfile.mkdtemp(dir=root))
     (root / ".gitignore").write_text("*\n")
     yield path
-    shutil.rmtree(path, ignore_errors=True)
+    shutil.rmtree(root, ignore_errors=True)
 
 
 @pytest.fixture(autouse=True)
