@@ -51,14 +51,21 @@ def _parse_deploy_args(args: list[str]) -> tuple[str, str, dict[str, str]]:
     return charm_path, app_name, resources
 
 
-def _workload_name(charm_source: Path) -> str:
+def _workload_spec(charm_source: Path) -> tuple[str, str]:
     data = _engine._read_yaml(charm_source / "charmcraft.yaml")
     containers = data.get("containers", {})
     if isinstance(containers, dict) and containers:
         first_name = next(iter(containers.keys()))
-        if isinstance(first_name, str):
-            return first_name
-    return "httpbin"
+        first_spec = containers[first_name]
+        if not isinstance(first_name, str) or not first_name:
+            raise _engine.CliError("charm metadata has an invalid container name")
+        if not isinstance(first_spec, dict):
+            raise _engine.CliError(f"container {first_name} metadata must be a mapping")
+        resource_name = first_spec.get("resource")
+        if not isinstance(resource_name, str) or not resource_name:
+            raise _engine.CliError(f"container {first_name} must define a resource")
+        return first_name, resource_name
+    raise _engine.CliError("charm must define at least one workload container")
 
 
 def deploy(args: list[str], model: str | None) -> int:
@@ -81,16 +88,16 @@ def deploy(args: list[str], model: str | None) -> int:
     model_state = state["models"][model_name]
 
     charm_path, app_name, resources = _parse_deploy_args(args)
-    image = resources.get("httpbin-image")
-    if not image:
-        raise _engine.CliError("missing required --resource httpbin-image=<image>")
-
     existing = model_state["apps"].get(app_name)
     if existing and existing.get("container_name"):
         _engine._docker_rm(existing["container_name"])
 
     charm_source = _engine._discover_charm_source(charm_path, app_name)
-    workload = _workload_name(charm_source)
+    workload, resource_name = _workload_spec(charm_source)
+    image = resources.get(resource_name)
+    if not image:
+        raise _engine.CliError(f"missing required --resource {resource_name}=<image>")
+
     container_name = _engine._sanitize_container_name(f"{model_name}-{app_name}")
     defaults = _engine._default_config(charm_source)
 
@@ -137,8 +144,10 @@ def deploy(args: list[str], model: str | None) -> int:
         env={
             "PEBBLE": "/jjx/pebble",
             "PEBBLE_SOCKET": "/jjx/socket",
+            "PYTHONPATH": "/",
         },
         user=f"{os.getuid()}:{os.getgid()}",
+        workdir="/jjx",
         entrypoint="/tmp/jjx-pebble",
         command=["run", "--create-dirs"],
     )

@@ -217,6 +217,7 @@ def _docker_run(
     mounts: list[tuple[str, str, bool]] | None = None,
     env: dict[str, str] | None = None,
     user: str | None = None,
+    workdir: str | None = None,
     entrypoint: str | None = None,
     command: list[str] | None = None,
 ) -> str:
@@ -239,6 +240,9 @@ def _docker_run(
 
     if user:
         cmd.extend(["--user", user])
+
+    if workdir:
+        cmd.extend(["--workdir", workdir])
 
     if entrypoint:
         cmd.extend(["--entrypoint", entrypoint])
@@ -595,7 +599,9 @@ def _run_charm_event(
 
     _wait_for_socket(_socket_path())
 
-    workload = workload_name or app_state.get("workload") or "httpbin"
+    workload = workload_name or app_state.get("workload")
+    if not isinstance(workload, str) or not workload:
+        raise CliError(f"application {app_name} has no workload container configured")
     env = _build_charm_env(
         model_name=model_name,
         model_state=model_state,
