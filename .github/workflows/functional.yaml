@@ -12,97 +12,25 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
-      - name: Install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
       - name: Install bubblewrap
-        run: sudo apt-get install -y bubblewrap
+        run: sudo apt-get install -y bubblewrap apparmor
       - name: Configure AppArmor policy for bubblewrap
         shell: bash
         run: |
           set -euxo pipefail
-          sudo apt-get install -y apparmor apparmor-utils
-
           BWRAP_PATH="$(command -v bwrap)"
           sudo tee /etc/apparmor.d/jjx-bwrap >/dev/null <<EOF
           abi <abi/4.0>,
           include <tunables/global>
-
           profile jjx-bwrap ${BWRAP_PATH} flags=(unconfined) {
             userns,
-
-            # Site-specific additions and overrides.
             include if exists <local/jjx-bwrap>
           }
           EOF
-
           sudo apparmor_parser -r /etc/apparmor.d/jjx-bwrap
-
-          if ! bwrap --ro-bind / / --dev /dev --proc /proc -- true; then
-            echo "bubblewrap still blocked after profile load; trying kernel.unprivileged_userns_clone=1"
-            sudo sysctl -w kernel.unprivileged_userns_clone=1
-            bwrap --ro-bind / / --dev /dev --proc /proc -- true
-          fi
-      - name: Diagnostic preflight
-        shell: bash
-        run: |
-          set -euxo pipefail
-          echo "date: $(date -u --iso-8601=seconds)"
-          echo "uname: $(uname -a)"
-          echo "pwd: $(pwd)"
-          echo "whoami: $(whoami)"
-          echo "PATH: ${PATH}"
-          echo "GITHUB_WORKSPACE: ${GITHUB_WORKSPACE}"
-          command -v python || true
-          command -v uv || true
-          command -v uvx || true
-          command -v docker || true
-          command -v bwrap || true
-          aa-status | sed -n '1,120p' || true
-          sudo cat /etc/apparmor.d/jjx-bwrap || true
-          sysctl kernel.apparmor_restrict_unprivileged_userns || true
-          sysctl kernel.unprivileged_userns_clone || true
-          bwrap --ro-bind / / --dev /dev --proc /proc -- true || true
-          python --version || true
-          uv --version || true
-          uvx --version || true
-          docker version || true
-          docker info || true
-          docker ps -a || true
-          id || true
-          groups || true
-          ls -la
-          echo "==== justfile ===="
-          sed -n '1,200p' justfile
-          echo "==== pyproject.toml ===="
-          sed -n '1,260p' pyproject.toml
+          bwrap --ro-bind / / --dev /dev --proc /proc -- true
       - name: Run functional tests
         env:
           UV_PYTHON: '3.10'
-          PYTEST_ADDOPTS: "-vv -ra --tb=long -s"
-          PYTHONFAULTHANDLER: '1'
         shell: bash
-        run: |
-          set -euxo pipefail
-          uvx --from rust-just just functional
-      - name: Dump debug artifacts on failure
-        if: failure()
-        shell: bash
-        run: |
-          set +e
-          echo "==== docker ps -a ===="
-          docker ps -a
-          echo "==== workspace tree (depth 4) ===="
-          find . -maxdepth 4 -print
-          echo "==== .tmp tree ===="
-          find .tmp -maxdepth 8 -print
-          echo "==== .tmp jjx files ===="
-          find .tmp -maxdepth 10 -type f \( -name '*.log' -o -name 'state.json' -o -name '.pebble.state' -o -name 'key.pem' -o -name 'socket' -o -name '*.db' \) -print
-          echo "==== dump selected .tmp files ===="
-          find .tmp -maxdepth 10 -type f \( -name 'state.json' -o -name '.pebble.state' -o -name '*.log' \) -exec sh -c 'echo "----- $1 -----"; sed -n "1,240p" "$1"' _ {} \;
-          echo "==== docker container inspect/logs (jjx*) ===="
-          for c in $(docker ps -a --format '{{.Names}}' | grep '^jjx-' || true); do
-            echo "----- inspect: ${c} -----"
-            docker inspect "${c}" | sed -n '1,240p'
-            echo "----- logs: ${c} -----"
-            docker logs "${c}" | sed -n '1,240p'
-          done
+        run: uvx --from rust-just just functional
