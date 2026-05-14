@@ -27,7 +27,7 @@ def test_dir(package_dir):
     pebble_cache_dir = root / "pebble-bin"
     os.environ["JJX_CACHED_PEBBLE_BIN"] = str(pebble_cache_dir)
     yield path
-    shutil.rmtree(root, ignore_errors=True)
+    shutil.rmtree(path, ignore_errors=True)
 
 
 @pytest.fixture(autouse=True)
