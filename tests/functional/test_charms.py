@@ -21,7 +21,7 @@ def test_dir(package_dir):
     root = package_dir / ".tmp"
     root.mkdir(parents=True, exist_ok=True)
     path = pathlib.Path(tempfile.mkdtemp(dir=root))
-    (path / ".gitignore").write_text("*\n")
+    (root / ".gitignore").write_text("*\n")
     yield path
     shutil.rmtree(path, ignore_errors=True)
 
@@ -43,10 +43,18 @@ def system_ready():
     assert result.returncode == 0, result.stderr.strip() or "cannot access docker daemon"
 
 
+def _ignore_hidden_or_private(_path, names):
+    return {name for name in names if name.startswith((".", "_"))}
+
+
 def test_charm(package_dir, charm_dir, request):
     test_dir = request.getfixturevalue("test_dir")
     working_dir = test_dir / charm_dir.name
-    shutil.copytree(charm_dir, working_dir)
+    shutil.copytree(
+        charm_dir,
+        working_dir,
+        ignore=_ignore_hidden_or_private,
+    )
     (working_dir / "placeholder.charm").touch()  # "Pack" the charm.
     command = [
         "uv",
