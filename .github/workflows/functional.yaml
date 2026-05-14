@@ -24,7 +24,6 @@ jobs:
           include <tunables/global>
           profile jjx-bwrap ${BWRAP_PATH} flags=(unconfined) {
             userns,
-
             include if exists <local/jjx-bwrap>
           }
           EOF
