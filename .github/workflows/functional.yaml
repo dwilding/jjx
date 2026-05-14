@@ -16,7 +16,62 @@ jobs:
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
       - name: Install bubblewrap
         run: sudo apt-get install -y bubblewrap
+      - name: Diagnostic preflight
+        shell: bash
+        run: |
+          set -euxo pipefail
+          echo "date: $(date -u --iso-8601=seconds)"
+          echo "uname: $(uname -a)"
+          echo "pwd: $(pwd)"
+          echo "whoami: $(whoami)"
+          echo "PATH: ${PATH}"
+          echo "GITHUB_WORKSPACE: ${GITHUB_WORKSPACE}"
+          command -v python || true
+          command -v uv || true
+          command -v uvx || true
+          command -v docker || true
+          command -v bwrap || true
+          python --version || true
+          uv --version || true
+          uvx --version || true
+          docker version || true
+          docker info || true
+          docker ps -a || true
+          id || true
+          groups || true
+          ls -la
+          echo "==== justfile ===="
+          sed -n '1,200p' justfile
+          echo "==== pyproject.toml ===="
+          sed -n '1,260p' pyproject.toml
       - name: Run functional tests
         env:
           UV_PYTHON: '3.10'
-        run: uvx --from rust-just just functional
+          PYTEST_ADDOPTS: "-vv -ra --tb=long -s"
+          PYTHONFAULTHANDLER: '1'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          uvx --from rust-just just functional
+      - name: Dump debug artifacts on failure
+        if: failure()
+        shell: bash
+        run: |
+          set +e
+          echo "==== docker ps -a ===="
+          docker ps -a
+          echo "==== workspace tree (depth 4) ===="
+          find . -maxdepth 4 -print
+          echo "==== .tmp tree ===="
+          find .tmp -maxdepth 8 -print
+          echo "==== .tmp jjx files ===="
+          find .tmp -maxdepth 10 -type f \( -name '*.log' -o -name 'state.json' -o -name '.pebble.state' -o -name 'key.pem' -o -name 'socket' -o -name '*.db' \) -print
+          echo "==== dump selected .tmp files ===="
+          find .tmp -maxdepth 10 -type f \( -name 'state.json' -o -name '.pebble.state' -o -name '*.log' \) -exec sh -c 'echo "----- $1 -----"; sed -n "1,240p" "$1"' _ {} \;
+          echo "==== docker container inspect/logs (jjx*) ===="
+          for c in $(docker ps -a --format '{{.Names}}' | grep '^jjx-' || true); do
+            echo "----- inspect: ${c} -----"
+            docker inspect "${c}" | sed -n '1,240p'
+            echo "----- logs: ${c} -----"
+            docker logs "${c}" | sed -n '1,240p'
+          done

@@ -2,6 +2,7 @@ import pathlib
 import shutil
 import subprocess
 import tempfile
+import textwrap
 
 import pytest
 
@@ -56,13 +57,32 @@ def test_charm(package_dir, charm_dir, request):
         "--with-editable",
         package_dir,
         "pytest",
-        "-v",
+        "-vv",
+        "-ra",
+        "--tb=long",
+        "-s",
         "tests/integration",
     ]
-    subprocess.run(
+    result = subprocess.run(
         command,
         cwd=working_dir,
         capture_output=True,
         text=True,
-        check=True,
+        check=False,
     )
+    if result.returncode != 0:
+        pytest.fail(
+            textwrap.dedent(
+                f"""
+                integration subprocess failed with exit code {result.returncode}
+                command: {command!r}
+                working_dir: {working_dir}
+
+                --- subprocess stdout ---
+                {result.stdout}
+
+                --- subprocess stderr ---
+                {result.stderr}
+                """
+            ).strip()
+        )
