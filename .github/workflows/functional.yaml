@@ -24,11 +24,14 @@ jobs:
           include <tunables/global>
           profile jjx-bwrap ${BWRAP_PATH} flags=(unconfined) {
             userns,
+
             include if exists <local/jjx-bwrap>
           }
           EOF
           sudo apparmor_parser -r /etc/apparmor.d/jjx-bwrap
           bwrap --ro-bind / / --dev /dev --proc /proc -- true
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
       - name: Run functional tests
         env:
           UV_PYTHON: '3.10'
