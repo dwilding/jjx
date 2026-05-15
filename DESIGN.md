@@ -54,14 +54,14 @@ The `.charm` file passed to deploy is a trigger only. `jjx` does not inspect or 
 - `./.jjx/.gitignore`
 - `./.jjx/state.json`
 - `./.jjx/hook-tools/`
-- `./.jjx/pebble/` (Pebble runtime directory)
 - `./.jjx/charm/` (staged runtime charm directory with `src/`, `metadata.yaml`, `config.yaml`, and `.unit-state.db`)
 
 `jjx` also caches the Pebble binary at `~/.cache/jjx/pebble-bin`, downloaded from canonical/pebble GitHub Releases on first use. This cache is shared across projects and persists across model teardowns to enable reuse across multiple deployments.
 
 Notes on generated runtime files:
 
-- Pebble runtime files (for example `socket`, `.pebble.state`, and `identity/key.pem`) are created under `./.jjx/pebble/`.
+- Pebble runtime files are created inside the workload container under Pebble's default state path: `/var/lib/pebble/default`.
+- `./.jjx/socket` is a host-side bind target for the Pebble API socket, used to bridge the containerized Pebble daemon to host-side hook execution.
 - `./.jjx/charm/.unit-state.db` is created by charm runtime state persistence.
 
 When the model is torn down, jjx removes the entire `./.jjx/` directory. The `~/.cache/jjx/pebble-bin` cache is kept for reuse across subsequent deployments.

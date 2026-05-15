@@ -28,7 +28,6 @@ import yaml
 STATE_DIR_NAME = ".jjx"
 STATE_FILE_NAME = "state.json"
 HOOK_TOOLS_DIR_NAME = "hook-tools"
-PEBBLE_DIR_NAME = "pebble"
 SOCKET_FILE_NAME = "socket"
 GITIGNORE_FILE_NAME = ".gitignore"
 
@@ -66,10 +65,6 @@ def _state_path() -> Path:
 
 def _hook_tools_dir() -> Path:
     return _jjx_dir() / HOOK_TOOLS_DIR_NAME
-
-
-def _pebble_dir() -> Path:
-    return _jjx_dir() / PEBBLE_DIR_NAME
 
 
 def _socket_path() -> Path:

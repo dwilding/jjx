@@ -118,8 +118,6 @@ def deploy(args: list[str], model: str | None) -> int:
 
     jjx_dir = _engine._jjx_dir()
     jjx_dir.mkdir(parents=True, exist_ok=True)
-    pebble_dir = _engine._pebble_dir()
-    pebble_dir.mkdir(parents=True, exist_ok=True)
 
     python_exe = _engine._python_executable()
     _engine._ensure_hook_tools(python_exe)
@@ -140,9 +138,9 @@ def deploy(args: list[str], model: str | None) -> int:
         image,
         container_name,
         mounts=mounts,
-        tmpfs_mounts=["/plan:mode=1777"],
+        tmpfs_mounts=["/plan:mode=1777", "/var/lib/pebble/default:mode=1777"],
         env={
-            "PEBBLE": "/jjx/pebble",
+            "PEBBLE": "/var/lib/pebble/default",
             "PEBBLE_SOCKET": "/jjx/socket",
             "PYTHONPATH": "/",
         },
