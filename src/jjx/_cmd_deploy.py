@@ -131,10 +131,9 @@ def deploy(args: list[str], model: str | None) -> int:
     pebble_binary = _engine._resolve_pebble_binary()
     if not pebble_binary.is_file():
         raise _engine.CliError(f"pebble cache path is not a file: {pebble_binary}")
-    mounted_pebble_binary = _engine._staged_pebble_binary(pebble_binary)
 
     mounts = [
-        (str(mounted_pebble_binary), "/tmp/jjx-pebble", True),
+        (str(pebble_binary), "/charm/bin/pebble", True),
         (str(jjx_dir), "/jjx", False),
     ]
     container_id = _engine._docker_run(
@@ -149,7 +148,7 @@ def deploy(args: list[str], model: str | None) -> int:
         },
         user=f"{os.getuid()}:{os.getgid()}",
         workdir="/plan",
-        entrypoint="/tmp/jjx-pebble",
+        entrypoint="/charm/bin/pebble",
         command=["run", "--create-dirs"],
     )
     model_state["apps"][app_name]["container_id"] = container_id
