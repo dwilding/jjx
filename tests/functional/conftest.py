@@ -34,11 +34,11 @@ def temp_dir():
     shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
-def ignore_hidden_or_private(_, names):
+def ignore_hidden_or_private(_, names: list[str]) -> set[str]:
     return {name for name in names if name.startswith((".", "_"))}
 
 
-def prepare_charm_dir(source_dir: pathlib.Path, target_dir: pathlib.Path):
+def prepare_charm_dir(source_dir: pathlib.Path, target_dir: pathlib.Path) -> None:
     shutil.copytree(
         source_dir,
         target_dir,
