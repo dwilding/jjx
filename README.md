@@ -7,13 +7,13 @@ There's no cloud or controller, but from the charm's perspective everything is r
 
 jjx's `juju` command is intended to be a drop-in replacement for charm integration tests. The `juju` CLI has just enough Juju-compatible functionality that Jubilant thinks it's talking to the real thing.
 
-### Why on earth?
+### Why?
 
 Fast intergration tests. _Laughably fast_ integration tests.
 
 ### And the catch?
 
-No relations. No scaling. No actions (for now). No secrets (for now). I think you get my point.
+No relations. No scaling. No actions (for now). No secrets (for now).
 
 ### Requirements
 
