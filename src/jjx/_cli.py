@@ -10,6 +10,7 @@ from . import (
     _cmd_debug_log,
     _cmd_deploy,
     _cmd_destroy_model,
+    _cmd_remove_application,
     _cmd_hook_tool,
     _cmd_status,
     _cmd_wait_for,
@@ -43,6 +44,8 @@ def _run_command(argv: list[str]) -> int:
         return _cmd_add_model.add_model(rest)
     if command == "deploy":
         return _cmd_deploy.deploy(rest, model)
+    if command == "remove-application":
+        return _cmd_remove_application.remove_application(rest, model)
     if command == "config":
         return _cmd_config.config(rest, model)
     if command == "status":
