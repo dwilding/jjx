@@ -4,6 +4,10 @@ import subprocess
 
 import pytest
 
+PACKAGE_DIR = pathlib.Path(__file__).parent.parent.parent
+CHARMS_DIR = pathlib.Path(__file__).parent / "charms"
+CHARM_PARAMS = [pytest.param(dir, id=dir.name) for dir in CHARMS_DIR.iterdir() if dir.is_dir()]
+
 
 @pytest.fixture(scope="session", autouse=True)
 def system_ready():
@@ -17,36 +21,17 @@ def system_ready():
         command,
         capture_output=True,
         text=True,
-        check=False,
     )
     assert result.returncode == 0, result.stderr.strip() or "cannot access docker daemon"
 
 
-# Prepare the test directories. The structure is:
-#
-# .                  package_dir   session scope
-# ├── .tmp           temp_dir      module scope
-# │   ├── <charm1>   charm_dir     module scope
-# │   ├── <charm2>   charm_dir     module scope
-
-
-@pytest.fixture(scope="session")
-def package_dir():
-    yield pathlib.Path(__file__).parent.parent.parent
-
-
 @pytest.fixture(scope="module")
-def temp_dir(package_dir):
-    tmp_dir = package_dir / ".tmp"
+def temp_dir():
+    tmp_dir = PACKAGE_DIR / ".tmp"
     tmp_dir.mkdir(exist_ok=True)
     (tmp_dir / ".gitignore").write_text("*\n")
     yield tmp_dir
     shutil.rmtree(tmp_dir, ignore_errors=True)
-
-
-def charm_dir_params():
-    charms = (pathlib.Path(__file__).parent / "charms").iterdir()
-    return [pytest.param(charm, id=charm.name) for charm in charms if charm.is_dir()]
 
 
 def ignore_hidden_or_private(_, names):
@@ -62,8 +47,15 @@ def prepare_charm_dir(source_dir: pathlib.Path, target_dir: pathlib.Path):
     (target_dir / "placeholder.charm").touch()  # "Pack" the charm.
 
 
-@pytest.fixture(scope="module", params=charm_dir_params())
+@pytest.fixture(scope="module", params=CHARM_PARAMS)
 def charm_dir(temp_dir, request):
     charm_dir = temp_dir / request.param.name
     prepare_charm_dir(request.param, charm_dir)
+    return charm_dir
+
+
+@pytest.fixture(scope="module")
+def k8s_2_configurable(temp_dir):
+    charm_dir = temp_dir / "k8s-2-configurable"
+    prepare_charm_dir(CHARMS_DIR / "k8s-2-configurable", charm_dir)
     return charm_dir

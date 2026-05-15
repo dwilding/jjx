@@ -1,14 +1,17 @@
+import pathlib
 import subprocess
 
+PACKAGE_DIR = pathlib.Path(__file__).parent.parent.parent
 
-def test_charm(package_dir, charm_dir):
+
+def test_charm(charm_dir):
     command = [
         "uv",
         "run",
         "--group",
         "integration",
         "--with-editable",
-        package_dir,
+        PACKAGE_DIR,
         "pytest",
         "-v",
         "tests/integration",
