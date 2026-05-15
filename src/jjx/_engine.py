@@ -215,6 +215,7 @@ def _docker_run(
     image: str,
     container_name: str,
     mounts: list[tuple[str, str, bool]] | None = None,
+    tmpfs_mounts: list[str] | None = None,
     env: dict[str, str] | None = None,
     user: str | None = None,
     workdir: str | None = None,
@@ -234,6 +235,9 @@ def _docker_run(
     for src, dst, read_only in mounts or []:
         mode = "ro" if read_only else "rw"
         cmd.extend(["--volume", f"{src}:{dst}:{mode}"])
+
+    for tmpfs in tmpfs_mounts or []:
+        cmd.extend(["--tmpfs", tmpfs])
 
     for key, value in (env or {}).items():
         cmd.extend(["--env", f"{key}={value}"])

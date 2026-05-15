@@ -141,13 +141,14 @@ def deploy(args: list[str], model: str | None) -> int:
         image,
         container_name,
         mounts=mounts,
+        tmpfs_mounts=["/plan:mode=1777"],
         env={
             "PEBBLE": "/jjx/pebble",
             "PEBBLE_SOCKET": "/jjx/socket",
             "PYTHONPATH": "/",
         },
         user=f"{os.getuid()}:{os.getgid()}",
-        workdir="/jjx",
+        workdir="/plan",
         entrypoint="/tmp/jjx-pebble",
         command=["run", "--create-dirs"],
     )
