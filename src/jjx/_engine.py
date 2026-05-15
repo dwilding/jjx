@@ -28,14 +28,11 @@ import yaml
 STATE_DIR_NAME = ".jjx"
 STATE_FILE_NAME = "state.json"
 HOOK_TOOLS_DIR_NAME = "hook-tools"
-PEBBLE_DIR_NAME = "pebble"
 SOCKET_FILE_NAME = "socket"
 GITIGNORE_FILE_NAME = ".gitignore"
 
 PEBBLE_RELEASES_API = "https://api.github.com/repos/canonical/pebble/releases/latest"
 PEBBLE_RELEASES_DOWNLOAD = "https://github.com/canonical/pebble/releases/download/{tag}/{asset}"
-
-JJX_CACHED_PEBBLE_BIN_ENV = "JJX_CACHED_PEBBLE_BIN"
 
 
 @dataclass
@@ -68,10 +65,6 @@ def _state_path() -> Path:
 
 def _hook_tools_dir() -> Path:
     return _jjx_dir() / HOOK_TOOLS_DIR_NAME
-
-
-def _pebble_dir() -> Path:
-    return _jjx_dir() / PEBBLE_DIR_NAME
 
 
 def _socket_path() -> Path:
@@ -112,30 +105,12 @@ def _save_state(state: dict[str, Any]) -> None:
     )
 
 
-def _remove_path(path: Path) -> None:
-    if path.is_dir() and not path.is_symlink():
-        shutil.rmtree(path, ignore_errors=True)
-        return
-    path.unlink(missing_ok=True)
-
-
 def _cleanup_model_artifacts() -> None:
-    for path in (
-        _state_path(),
-        _socket_path(),
-        _pebble_dir(),
-        _hook_tools_dir(),
-        _jjx_dir() / "charm",
-    ):
-        _remove_path(path)
+    """Remove all project-local runtime state from .jjx/.
 
-    jjx_dir = _jjx_dir()
-    if not jjx_dir.exists():
-        return
-    try:
-        next(jjx_dir.iterdir())
-    except StopIteration:
-        jjx_dir.rmdir()
+    The pebble cache at ~/.cache/jjx/pebble-bin is preserved for reuse.
+    """
+    shutil.rmtree(_jjx_dir(), ignore_errors=True)
 
 
 def _append_log(model_state: dict[str, Any], message: str) -> None:
@@ -215,6 +190,7 @@ def _docker_run(
     image: str,
     container_name: str,
     mounts: list[tuple[str, str, bool]] | None = None,
+    tmpfs_mounts: list[str] | None = None,
     env: dict[str, str] | None = None,
     user: str | None = None,
     workdir: str | None = None,
@@ -234,6 +210,9 @@ def _docker_run(
     for src, dst, read_only in mounts or []:
         mode = "ro" if read_only else "rw"
         cmd.extend(["--volume", f"{src}:{dst}:{mode}"])
+
+    for tmpfs in tmpfs_mounts or []:
+        cmd.extend(["--tmpfs", tmpfs])
 
     for key, value in (env or {}).items():
         cmd.extend(["--env", f"{key}={value}"])
@@ -283,21 +262,9 @@ def _docker_list_model_containers(model_name: str) -> list[str]:
 
 
 def _resolve_pebble_binary() -> Path:
-    local_cache_path = _jjx_dir() / "bin" / "pebble"
-    if local_cache_path.exists():
-        return local_cache_path
-
-    # Check for external cache directory via environment variable
-    external_cache_dir = os.environ.get(JJX_CACHED_PEBBLE_BIN_ENV)
-    external_cache_path = None
-    if external_cache_dir:
-        external_cache_path = Path(external_cache_dir)
-        if external_cache_path.exists():
-            # Copy from external cache to local cache
-            local_cache_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(external_cache_path, local_cache_path)
-            local_cache_path.chmod(0o755)
-            return local_cache_path
+    cache_path = Path.home() / ".cache" / "jjx" / "pebble-bin"
+    if cache_path.exists():
+        return cache_path
 
     arch_map = {
         "x86_64": "amd64",
@@ -336,9 +303,7 @@ def _resolve_pebble_binary() -> Path:
     if not download_url:
         raise CliError(f"pebble asset has no download URL: {asset_name}")
 
-    # Determine where to download to: external cache if configured, otherwise local
-    download_path = external_cache_path if external_cache_path else local_cache_path
-    download_path.parent.mkdir(parents=True, exist_ok=True)
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
         request = Request(download_url, headers={"User-Agent": "jjx"})
@@ -358,40 +323,12 @@ def _resolve_pebble_binary() -> Path:
                 extracted = archive.extractfile(member)
                 if extracted is None:
                     raise CliError(f"failed to extract pebble binary from {asset_name}")
-                download_path.write_bytes(extracted.read())
+                cache_path.write_bytes(extracted.read())
     except (HTTPError, URLError, TimeoutError, tarfile.TarError, OSError) as exc:
         raise CliError(f"failed to download pebble: {exc}") from None
 
-    download_path.chmod(0o755)
-
-    # If we downloaded to external cache, copy to local cache
-    if external_cache_path and external_cache_path != local_cache_path:
-        local_cache_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(download_path, local_cache_path)
-        local_cache_path.chmod(0o755)
-
-    return local_cache_path
-
-
-def _staged_pebble_binary(pebble_binary: Path) -> Path:
-    """Return a daemon-visible Pebble binary path for Docker bind mounts.
-
-    Some Docker setups cannot bind deep or unusual project paths reliably.
-    Staging in ``/tmp`` keeps the mount path simple and stable.
-    """
-
-    cache_root = Path.home() / ".cache"
-    staged = cache_root / "jjx" / f"pebble-{os.getuid()}"
-    staged.parent.mkdir(parents=True, exist_ok=True)
-    if staged.exists() and staged.is_file():
-        src_stat = pebble_binary.stat()
-        dst_stat = staged.stat()
-        if dst_stat.st_size == src_stat.st_size and dst_stat.st_mtime >= src_stat.st_mtime:
-            return staged
-
-    shutil.copy2(pebble_binary, staged)
-    staged.chmod(0o755)
-    return staged
+    cache_path.chmod(0o755)
+    return cache_path
 
 
 def _wait_for_socket(socket_path: Path, timeout: float = 20.0) -> None:

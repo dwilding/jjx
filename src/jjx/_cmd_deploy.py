@@ -118,8 +118,6 @@ def deploy(args: list[str], model: str | None) -> int:
 
     jjx_dir = _engine._jjx_dir()
     jjx_dir.mkdir(parents=True, exist_ok=True)
-    pebble_dir = _engine._pebble_dir()
-    pebble_dir.mkdir(parents=True, exist_ok=True)
 
     python_exe = _engine._python_executable()
     _engine._ensure_hook_tools(python_exe)
@@ -131,24 +129,24 @@ def deploy(args: list[str], model: str | None) -> int:
     pebble_binary = _engine._resolve_pebble_binary()
     if not pebble_binary.is_file():
         raise _engine.CliError(f"pebble cache path is not a file: {pebble_binary}")
-    mounted_pebble_binary = _engine._staged_pebble_binary(pebble_binary)
 
     mounts = [
-        (str(mounted_pebble_binary), "/tmp/jjx-pebble", True),
+        (str(pebble_binary), "/charm/bin/pebble", True),
         (str(jjx_dir), "/jjx", False),
     ]
     container_id = _engine._docker_run(
         image,
         container_name,
         mounts=mounts,
+        tmpfs_mounts=["/plan:mode=1777", "/var/lib/pebble/default:mode=1777"],
         env={
-            "PEBBLE": "/jjx/pebble",
+            "PEBBLE": "/var/lib/pebble/default",
             "PEBBLE_SOCKET": "/jjx/socket",
             "PYTHONPATH": "/",
         },
         user=f"{os.getuid()}:{os.getgid()}",
-        workdir="/jjx",
-        entrypoint="/tmp/jjx-pebble",
+        workdir="/plan",
+        entrypoint="/charm/bin/pebble",
         command=["run", "--create-dirs"],
     )
     model_state["apps"][app_name]["container_id"] = container_id
