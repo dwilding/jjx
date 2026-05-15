@@ -1,7 +1,6 @@
 import pathlib
 import shutil
 import subprocess
-import tempfile
 
 import pytest
 
@@ -18,12 +17,11 @@ def charm_dir(request):
 
 @pytest.fixture(scope="module", autouse=True)
 def test_dir(package_dir):
-    root = package_dir / ".tmp"
-    root.mkdir(parents=True, exist_ok=True)
-    path = pathlib.Path(tempfile.mkdtemp(dir=root))
-    (root / ".gitignore").write_text("*\n")
-    yield path
-    shutil.rmtree(root, ignore_errors=True)
+    tmp_dir = package_dir / ".tmp"
+    tmp_dir.mkdir(exist_ok=True)
+    (tmp_dir / ".gitignore").write_text("*\n")
+    yield tmp_dir
+    shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 @pytest.fixture(autouse=True)
