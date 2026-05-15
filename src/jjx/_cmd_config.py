@@ -46,6 +46,16 @@ def config(args: list[str], model: str | None) -> int:
                 sys.stdout.write(f"{key}: {value}\n")
         return 0
 
+    # Check whether the remaining tokens are all bare key reads (no assignments or resets).
+    extra = parsed[1:]
+    if all("=" not in token and token != "--reset" for token in extra):
+        cfg = app_state.get("config", {})
+        for key in extra:
+            if key not in cfg:
+                raise _engine.CliError(f"key {key!r} not found in application config")
+            sys.stdout.write(f"{cfg[key]}\n")
+        return 0
+
     reset_keys: set[str] = set()
     assignments: dict[str, str] = {}
     j = 1
