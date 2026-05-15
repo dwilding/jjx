@@ -1,11 +1,9 @@
-jjx is a **very experimental** test adapter for Kubernetes charms.
-
-jjx provides a `juju` command that can "deploy" unpacked charms:
+jjx is a **very experimental** test adapter for Kubernetes charms. It provides a `juju` command that can "deploy" unpacked charms:
 
 - The charm source runs locally, inside a lightweight sandbox environment
 - The workload runs as a Docker container
 
-There's no cloud or controller, but from the charm's perspective everything is real. Pebble is really managing the container and the expected hook tools are available.
+There's no cloud or controller, but from the charm's perspective everything is real. Pebble is really managing the container. The expected hook tools are available.
 
 jjx's `juju` command is intended to be a drop-in replacement for charm integration tests. The `juju` CLI has just enough Juju-compatible functionality that Jubilant thinks it's talking to the real thing.
 
@@ -20,7 +18,7 @@ No relations. No scaling. No actions (for now). No secrets (for now). I think yo
 ### Requirements
 
 - uv
-- [bubblewrap](https://github.com/containers/bubblewrap) (for the lightweight sandbox)
+- [bubblewrap](https://github.com/containers/bubblewrap) for the lightweight sandbox
 - Docker
 
 ### Demo
@@ -30,7 +28,7 @@ No relations. No scaling. No actions (for now). No secrets (for now). I think yo
 git clone https://github.com/canonical/operator.git
 cd operator/examples/httpbin-demo
 
-# "Pack" the charm (otherwise the integration tests will complain)
+# "Pack" the charm so the integration tests don't complain
 touch placeholder.charm
 
 # Go!
