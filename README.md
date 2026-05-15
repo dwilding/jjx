@@ -9,7 +9,7 @@ jjx's `juju` command is intended to be a drop-in replacement for charm integrati
 
 ### Why?
 
-Fast intergration tests. _Laughably fast_ integration tests.
+Fast integration tests. _Laughably fast_ integration tests.
 
 ### And the catch?
 
