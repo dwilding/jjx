@@ -21,6 +21,16 @@ No relations. No scaling. No actions (for now). No secrets (for now).
 - [bubblewrap](https://github.com/containers/bubblewrap) for the lightweight sandbox
 - Docker
 
+### Usage
+
+Run your charm's integration tests with:
+
+```text
+uv run --group integration --with jjx pytest -v tests/integration
+```
+
+`--with jjx` tells uv to install jjx in your charm's virtual environment, which exposes jjx's `juju` command. You don't need to manually install jjx.
+
 ### Demo
 
 ```sh
