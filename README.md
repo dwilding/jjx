@@ -7,19 +7,29 @@ There's no cloud or controller, but from the charm's perspective everything is r
 
 jjx's `juju` command is intended to be a drop-in replacement for charm integration tests. The `juju` CLI has just enough Juju-compatible functionality that Jubilant thinks it's talking to the real thing.
 
-### Why on earth?
+### Why?
 
-Fast intergration tests. _Laughably fast_ integration tests.
+Fast integration tests. _Laughably fast_ integration tests.
 
 ### And the catch?
 
-No relations. No scaling. No actions (for now). No secrets (for now). I think you get my point.
+No relations. No scaling. No actions (for now). No secrets (for now).
 
 ### Requirements
 
 - uv
 - [bubblewrap](https://github.com/containers/bubblewrap) for the lightweight sandbox
 - Docker
+
+### Usage
+
+Run your charm's integration tests with:
+
+```text
+uv run --group integration --with jjx pytest -v tests/integration
+```
+
+`--with jjx` tells uv to install jjx in your charm's virtual environment, which exposes jjx's `juju` command. You don't need to manually install jjx.
 
 ### Demo
 
