@@ -23,7 +23,7 @@ No relations. No scaling. No actions (for now). No secrets (for now).
 
 ### Usage
 
-Run your charm's integration tests with:
+Run your charm's integration tests:
 
 ```text
 uv run --group integration --with jjx pytest -v tests/integration
