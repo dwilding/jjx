@@ -49,7 +49,7 @@ def test_server_process(k8s_2_configurable):
         "./placeholder.charm",
         "fastapi-demo",
         "--resource",
-        "demo-server-image=ghcr.io/canonical/api_demo_server:1.0.3",
+        "demo-server-image=ghcr.io/canonical/api_demo_server:1.0.4",
     ]
     subprocess.run(
         command,
