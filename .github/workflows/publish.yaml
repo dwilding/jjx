@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: publish-jjx
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.0.2
         with:
           persist-credentials: false
       - name: Install uv
