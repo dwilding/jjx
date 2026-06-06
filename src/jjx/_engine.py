@@ -372,7 +372,12 @@ def _ensure_hook_tools(python_exe: str) -> None:
     for tool in tools:
         path = root / tool
         path.write_text(
-            (f'#!/bin/sh\nexec {python_exe} -m jjx._cli _hook-tool {tool} "$@"\n'),
+            (
+                "#!/bin/sh\n"
+                f'exec "{python_exe}" -c \'import sys; '
+                "import jjx; "
+                f'raise SystemExit(jjx.run_hook_tool("{tool}", sys.argv[1:]))\' "$@"\n'
+            ),
             encoding="utf-8",
         )
         path.chmod(0o755)

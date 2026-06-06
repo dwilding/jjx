@@ -1,4 +1,4 @@
-"""Entry-point for the ``juju`` compatibility CLI."""
+"""Entrypoints for the `jjx` CLI and the `juju` compatibility CLI."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from . import (
 )
 
 
-def _extract_model(args: list[str]) -> tuple[str | None, list[str]]:
+def extract_model(args: list[str]) -> tuple[str | None, list[str]]:
     if "--model" not in args:
         return None, args
 
@@ -30,7 +30,7 @@ def _extract_model(args: list[str]) -> tuple[str | None, list[str]]:
     return model, stripped
 
 
-def _run_command(argv: list[str]) -> int:
+def run_juju_command(argv: list[str]) -> int:
     if not argv:
         raise _engine.CliError("usage: juju <command> [options]")
 
@@ -38,7 +38,7 @@ def _run_command(argv: list[str]) -> int:
     if command == "_hook-tool":
         return _cmd_hook_tool.hook_tool(argv[1:])
 
-    model, rest = _extract_model(argv[1:])
+    model, rest = extract_model(argv[1:])
 
     if command == "add-model":
         return _cmd_add_model.add_model(rest)
@@ -60,15 +60,26 @@ def _run_command(argv: list[str]) -> int:
     raise _engine.CliError(f"unknown command: {command}")
 
 
-def main() -> int:
-    """Run the CLI and return an exit code."""
+def juju_dispatch(argv: list[str]) -> int:
+    """Run a Juju-compatible argv vector and return an exit code."""
     try:
-        return _run_command(sys.argv[1:])
+        return run_juju_command(argv)
     except _engine.CliError as exc:
         if exc.message:
             sys.stderr.write(exc.message + "\n")
         return exc.exit_code
 
 
-if __name__ == "__main__":
-    raise SystemExit(main())
+def run_hook_tool(tool: str, args: list[str]) -> int:
+    """Run one internal hook tool with the given arguments."""
+    return juju_dispatch(["_hook-tool", tool, *args])
+
+
+def juju_cli() -> int:
+    """Run the ``juju`` compatibility CLI and return an exit code."""
+    return juju_dispatch(sys.argv[1:])
+
+
+def jjx_cli() -> int:
+    """Run the ``jjx`` CLI and return an exit code."""
+    raise NotImplementedError

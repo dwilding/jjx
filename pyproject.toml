@@ -13,7 +13,8 @@ dependencies = [
 ]
 
 [project.scripts]
-juju = "jjx._cli:main"
+jjx = "jjx._cli:jjx_cli"
+juju = "jjx._cli:juju_cli"
 
 [dependency-groups]
 dev = [
