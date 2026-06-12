@@ -7,10 +7,34 @@ place, while external imports of ``jjx._cmd_deploy`` remain stable.
 from __future__ import annotations
 
 import os
+import re
 import uuid
 from pathlib import Path
 
 from . import _engine
+
+
+_DOCKER_PUBLISH_RE = re.compile(r"^(?P<host_port>\d{1,5}):(?P<container_port>\d{1,5})$")
+
+
+def _parse_docker_publish(raw: str) -> str:
+    match = _DOCKER_PUBLISH_RE.fullmatch(raw)
+    if not match:
+        raise _engine.CliError("JJX_DOCKER_PUBLISH must be in HOST_PORT:CONTAINER_PORT format")
+
+    host_port = int(match.group("host_port"))
+    container_port = int(match.group("container_port"))
+    if not (1 <= host_port <= 65535 and 1 <= container_port <= 65535):
+        raise _engine.CliError("JJX_DOCKER_PUBLISH ports must be between 1 and 65535")
+
+    return f"127.0.0.1:{host_port}:{container_port}"
+
+
+def _docker_publish_from_env() -> str | None:
+    raw = os.environ.get("JJX_DOCKER_PUBLISH", "").strip()
+    if not raw:
+        return None
+    return _parse_docker_publish(raw)
 
 
 def _parse_deploy_args(args: list[str]) -> tuple[str, str, dict[str, str]]:
@@ -134,11 +158,13 @@ def deploy(args: list[str], model: str | None) -> int:
         (str(pebble_binary), "/charm/bin/pebble", True),
         (str(jjx_dir), "/jjx", False),
     ]
+    publish = _docker_publish_from_env()
     container_id = _engine._docker_run(
         image,
         container_name,
         mounts=mounts,
         tmpfs_mounts=["/plan:mode=1777", "/var/lib/pebble/default:mode=1777"],
+        publish=publish,
         env={
             "PEBBLE": "/var/lib/pebble/default",
             "PEBBLE_SOCKET": "/jjx/socket",
