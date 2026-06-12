@@ -214,6 +214,7 @@ def _docker_run(
     container_name: str,
     mounts: list[tuple[str, str, bool]] | None = None,
     tmpfs_mounts: list[str] | None = None,
+    publish: str | None = None,
     env: dict[str, str] | None = None,
     user: str | None = None,
     workdir: str | None = None,
@@ -233,6 +234,9 @@ def _docker_run(
 
     if network:
         cmd.extend(["--network", network])
+
+    if publish:
+        cmd.extend(["--publish", publish])
 
     for src, dst, read_only in mounts or []:
         mode = "ro" if read_only else "rw"

@@ -90,6 +90,7 @@ Deploy flow:
 1. ensure `./.jjx` exists and load state
 2. stage runtime charm files in `./.jjx/charm/` (`src/`, `metadata.yaml`, `config.yaml`)
 3. start workload container and Pebble on Docker bridge networking (no host networking)
+   - if `JJX_DOCKER_PUBLISH` is set to `HOST_PORT:CONTAINER_PORT`, add Docker publish `127.0.0.1:HOST_PORT:CONTAINER_PORT`
 4. bind host socket at `./.jjx/socket`
 5. resolve workload container IP
 6. write `./.jjx/sitecustomize/sitecustomize.py` and prepend it to hook `PYTHONPATH`
