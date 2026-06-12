@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+import signal
+import subprocess
 import sys
 
 from . import (
@@ -76,10 +80,78 @@ def run_hook_tool(tool: str, args: list[str]) -> int:
 
 
 def juju_cli() -> int:
-    """Run the ``juju`` compatibility CLI and return an exit code."""
+    """Run the `juju` compatibility CLI and return an exit code.
+
+    The `juju` CLI is intended to be run when the `jjx` package is installed in the charm's venv.
+    """
     return juju_dispatch(sys.argv[1:])
 
 
+def teardown_all_models() -> None:
+    """Destroy all models currently in state."""
+    state = _engine._load_state()
+    for model_name in state.get("models", {}):
+        _cmd_destroy_model.destroy_model([model_name])
+
+
+def jjx_pytest_env_args(charm_root: Path) -> list[str]:
+    """Return uv-run args that keep jjx resolution consistent with launch mode."""
+    charm_venv_dir = (charm_root / ".venv").absolute()
+    current_python = Path(sys.executable).absolute()
+
+    # Case 1: running from the charm venv; pin uv to the current interpreter.
+    if charm_venv_dir in current_python.parents:
+        return ["--python", sys.executable]
+
+    package_root = Path(__file__).resolve().parents[2]
+
+    # Case 2: running from a local checkout/tool workflow; use editable source.
+    if (package_root / "pyproject.toml").exists():
+        return ["--with-editable", str(package_root)]
+
+    # Case 3: fallback when no local checkout is available.
+    return ["--with", "jjx"]
+
+
 def jjx_cli() -> int:
-    """Run the ``jjx`` CLI and return an exit code."""
-    raise NotImplementedError
+    """Run the `jjx` CLI and return an exit code.
+
+    The `jjx` CLI can be run when the `jjx` package is installed in the charm's venv,
+    or as a tool outside the charm's venv.
+    """
+    # Handle explicit destroy command
+    if len(sys.argv) > 1 and sys.argv[1] == "destroy":
+        teardown_all_models()
+        return 0
+
+    charm_root = _engine._project_root()
+    placeholder_charm = charm_root / "placeholder.charm"
+    if not placeholder_charm.exists():
+        placeholder_charm.touch()
+
+    env = os.environ.copy()
+    env["CHARM_PATH"] = str(placeholder_charm)
+
+    cmd = [
+        "uv",
+        "run",
+        *jjx_pytest_env_args(charm_root),
+        "--group",
+        "integration",
+        "pytest",
+        "tests/integration",
+        "--no-juju-teardown",
+    ]
+
+    try:
+        proc = subprocess.run(cmd, env=env)
+        print("\nWorkload container is running")
+        signal.pause()
+        return proc.returncode
+    except KeyboardInterrupt:
+        # Destroy all models on Ctrl+C
+        print()
+        teardown_all_models()
+        if placeholder_charm.exists():
+            placeholder_charm.unlink()
+        return 130  # Standard exit code for SIGINT
