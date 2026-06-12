@@ -63,6 +63,7 @@ Notes on generated runtime files:
 
 - Pebble runtime files are created inside the workload container under Pebble's default state path: `/var/lib/pebble/default`.
 - `./.jjx/socket` is a host-side bind target for the Pebble API socket, used to bridge the containerized Pebble daemon to host-side hook execution.
+- `JJX_CONTAINER_IP` is injected into the hook process environment from Docker inspect output for the workload container.
 - `./.jjx/sitecustomize/sitecustomize.py` rewrites outbound Python socket connects from `0.0.0.0:<port>` to the workload container bridge IP with the same port.
 - `./.jjx/charm/.unit-state.db` is created by charm runtime state persistence.
 
@@ -93,10 +94,11 @@ Deploy flow:
    - if `JJX_DOCKER_PUBLISH` is set to `HOST_PORT:CONTAINER_PORT`, add Docker publish `127.0.0.1:HOST_PORT:CONTAINER_PORT`
 4. bind host socket at `./.jjx/socket`
 5. resolve workload container IP
-6. write `./.jjx/sitecustomize/sitecustomize.py` and prepend it to hook `PYTHONPATH`
-7. serve hook tools from `./.jjx/hook-tools`
-8. run charm hooks in `bubblewrap`
-9. persist resulting app and unit status
+6. set `JJX_CONTAINER_IP` in hook process environment from the resolved container IP
+7. write `./.jjx/sitecustomize/sitecustomize.py` and prepend it to hook `PYTHONPATH`
+8. serve hook tools from `./.jjx/hook-tools`
+9. run charm hooks in `bubblewrap`
+10. persist resulting app and unit status
 
 Config flow:
 
@@ -127,6 +129,10 @@ Destroy flow:
 - requires Linux (Unix sockets + `bubblewrap` assumptions)
 - assumes charm source is present in `./src`
 - assumes charm metadata files are present in project
+
+State isolation rule:
+- `./.jjx/state.json` is internal runtime state and not a supported charm interface.
+- Charm code must not read or write `./.jjx/state.json`; runtime behavior must not depend on charm access to this file.
 
 These constraints are deliberate. They keep the system small, predictable, and fast to debug.
 
