@@ -54,7 +54,7 @@ The `.charm` file passed to deploy is a trigger only. `jjx` does not inspect or 
 - `./.jjx/.gitignore`
 - `./.jjx/state.json`
 - `./.jjx/hook-tools/`
-- `./.jjx/sitecustomize/` (runtime Python shim injected into charm hook execution)
+- `./.jjx/sitecustomize.py` (runtime Python shim injected into charm hook execution)
 - `./.jjx/charm/` (staged runtime charm directory with `src/`, `metadata.yaml`, `config.yaml`, and `.unit-state.db`)
 
 `jjx` also caches the Pebble binary at `~/.cache/jjx/pebble-bin`, downloaded from canonical/pebble GitHub Releases on first use. This cache is shared across projects and persists across model teardowns to enable reuse across multiple deployments.
@@ -64,7 +64,7 @@ Notes on generated runtime files:
 - Pebble runtime files are created inside the workload container under Pebble's default state path: `/var/lib/pebble/default`.
 - `./.jjx/socket` is a host-side bind target for the Pebble API socket, used to bridge the containerized Pebble daemon to host-side hook execution.
 - `JJX_CONTAINER_IP` is injected into the hook process environment from Docker inspect output for the workload container.
-- `./.jjx/sitecustomize/sitecustomize.py` rewrites outbound Python socket connects from `0.0.0.0:<port>` to the workload container bridge IP with the same port.
+- `./.jjx/sitecustomize.py` rewrites outbound Python socket connects from `0.0.0.0:<port>` to the workload container bridge IP with the same port.
 - `./.jjx/charm/.unit-state.db` is created by charm runtime state persistence.
 
 When the model is torn down, jjx removes the entire `./.jjx/` directory. The `~/.cache/jjx/pebble-bin` cache is kept for reuse across subsequent deployments.
@@ -95,7 +95,7 @@ Deploy flow:
 4. bind host socket at `./.jjx/socket`
 5. resolve workload container IP
 6. set `JJX_CONTAINER_IP` in hook process environment from the resolved container IP
-7. write `./.jjx/sitecustomize/sitecustomize.py` and prepend it to hook `PYTHONPATH`
+7. write `./.jjx/sitecustomize.py` and prepend `./.jjx` to hook `PYTHONPATH`
 8. serve hook tools from `./.jjx/hook-tools`
 9. run charm hooks in `bubblewrap`
 10. persist resulting app and unit status

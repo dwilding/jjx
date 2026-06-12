@@ -30,7 +30,7 @@ STATE_FILE_NAME = "state.json"
 HOOK_TOOLS_DIR_NAME = "hook-tools"
 SOCKET_FILE_NAME = "socket"
 GITIGNORE_FILE_NAME = ".gitignore"
-SITECUSTOMIZE_DIR_NAME = "sitecustomize"
+SITECUSTOMIZE_FILE_NAME = "sitecustomize.py"
 
 PEBBLE_RELEASES_API = "https://api.github.com/repos/canonical/pebble/releases/latest"
 PEBBLE_RELEASES_DOWNLOAD = "https://github.com/canonical/pebble/releases/download/{tag}/{asset}"
@@ -90,8 +90,8 @@ def _socket_path() -> Path:
     return _jjx_dir() / SOCKET_FILE_NAME
 
 
-def _sitecustomize_dir() -> Path:
-    return _jjx_dir() / SITECUSTOMIZE_DIR_NAME
+def _sitecustomize_path() -> Path:
+    return _jjx_dir() / SITECUSTOMIZE_FILE_NAME
 
 
 def _gitignore_path() -> Path:
@@ -624,17 +624,17 @@ def _run_charm_event(
     container_ip = _docker_container_ip(container_name)
     env["JJX_CONTAINER_IP"] = container_ip
 
-    sitecustomize_dir = _jjx_dir() / "sitecustomize"
-    sitecustomize_dir = _sitecustomize_dir()
-    sitecustomize_dir.mkdir(parents=True, exist_ok=True)
-    (sitecustomize_dir / "sitecustomize.py").write_text(
+    sitecustomize_path = _sitecustomize_path()
+    sitecustomize_path.parent.mkdir(parents=True, exist_ok=True)
+    sitecustomize_path.write_text(
         _SITECUSTOMIZE_PY,
         encoding="utf-8",
     )
+    sitecustomize_parent = sitecustomize_path.parent
     env["PYTHONPATH"] = (
-        f"{sitecustomize_dir}:{env.get('PYTHONPATH', '')}"
+        f"{sitecustomize_parent}:{env.get('PYTHONPATH', '')}"
         if env.get("PYTHONPATH")
-        else str(sitecustomize_dir)
+        else str(sitecustomize_parent)
     )
 
     cmd = _bwrap_cmd(charm_root, workload) + [python_exe, str(charm_entrypoint)]
