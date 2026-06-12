@@ -184,4 +184,15 @@ def hook_tool(args: list[str]) -> int:
         sys.stdout.write(json.dumps(out))
         return 0
 
+    if tool == "application-version-set":
+        # ops invokes: application-version-set -- <version>
+        if tool_args and tool_args[0] == "--":
+            version = " ".join(tool_args[1:]).strip()
+        else:
+            version = " ".join(tool_args).strip()
+        app_state["workload_version"] = version
+        app_state["updated_at"] = _engine._now_iso()
+        _engine._save_state(state)
+        return 0
+
     raise _engine.CliError(f"unsupported hook tool: {tool}")

@@ -30,9 +30,28 @@ STATE_FILE_NAME = "state.json"
 HOOK_TOOLS_DIR_NAME = "hook-tools"
 SOCKET_FILE_NAME = "socket"
 GITIGNORE_FILE_NAME = ".gitignore"
+SITECUSTOMIZE_FILE_NAME = "sitecustomize.py"
 
 PEBBLE_RELEASES_API = "https://api.github.com/repos/canonical/pebble/releases/latest"
 PEBBLE_RELEASES_DOWNLOAD = "https://github.com/canonical/pebble/releases/download/{tag}/{asset}"
+
+# Injected into the charm's Python environment to rewrite connect(0.0.0.0, port)
+# to connect(container_ip, port), mirroring the K8s pod shared-network-namespace model.
+_SITECUSTOMIZE_PY = """\
+import os as _os
+import socket as _socket
+
+_container_ip = _os.environ.get("JJX_CONTAINER_IP", "")
+if _container_ip:
+    _orig_connect = _socket.socket.connect
+
+    def _patched_connect(self, address):
+        if isinstance(address, tuple) and address[0] in ("0.0.0.0", "::"):
+            address = (_container_ip, *address[1:])
+        return _orig_connect(self, address)
+
+    _socket.socket.connect = _patched_connect
+"""
 
 
 @dataclass
@@ -69,6 +88,10 @@ def _hook_tools_dir() -> Path:
 
 def _socket_path() -> Path:
     return _jjx_dir() / SOCKET_FILE_NAME
+
+
+def _sitecustomize_path() -> Path:
+    return _jjx_dir() / SITECUSTOMIZE_FILE_NAME
 
 
 def _gitignore_path() -> Path:
@@ -191,11 +214,13 @@ def _docker_run(
     container_name: str,
     mounts: list[tuple[str, str, bool]] | None = None,
     tmpfs_mounts: list[str] | None = None,
+    publish: str | None = None,
     env: dict[str, str] | None = None,
     user: str | None = None,
     workdir: str | None = None,
     entrypoint: str | None = None,
     command: list[str] | None = None,
+    network: str | None = None,
 ) -> str:
     cmd = [
         "docker",
@@ -206,6 +231,12 @@ def _docker_run(
         "--name",
         container_name,
     ]
+
+    if network:
+        cmd.extend(["--network", network])
+
+    if publish:
+        cmd.extend(["--publish", publish])
 
     for src, dst, read_only in mounts or []:
         mode = "ro" if read_only else "rw"
@@ -243,6 +274,30 @@ def _docker_rm(container_name: str) -> None:
         capture_output=True,
         text=True,
     )
+
+
+def _docker_container_ip(container_name: str) -> str:
+    try:
+        proc = subprocess.run(
+            [
+                "docker",
+                "inspect",
+                "--format",
+                "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
+                container_name,
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise CliError(
+            f"failed to get IP for container {container_name}: {exc.stderr.strip()}"
+        ) from None
+    ip = proc.stdout.strip()
+    if not ip:
+        raise CliError(f"container {container_name} has no IP address (is it running?)")
+    return ip
 
 
 def _docker_list_model_containers(model_name: str) -> list[str]:
@@ -366,7 +421,14 @@ def _python_executable() -> str:
 
 
 def _ensure_hook_tools(python_exe: str) -> None:
-    tools = ["config-get", "status-get", "status-set", "is-leader", "juju-log"]
+    tools = [
+        "application-version-set",
+        "config-get",
+        "status-get",
+        "status-set",
+        "is-leader",
+        "juju-log",
+    ]
     root = _hook_tools_dir()
     root.mkdir(parents=True, exist_ok=True)
     for tool in tools:
@@ -556,6 +618,25 @@ def _run_charm_event(
     if site_paths:
         env["PYTHONPATH"] = ":".join(site_paths)
 
+    container_name = app_state.get("container_name", "")
+    if not container_name:
+        raise CliError(f"application {app_name} has no container name in state")
+    container_ip = _docker_container_ip(container_name)
+    env["JJX_CONTAINER_IP"] = container_ip
+
+    sitecustomize_path = _sitecustomize_path()
+    sitecustomize_path.parent.mkdir(parents=True, exist_ok=True)
+    sitecustomize_path.write_text(
+        _SITECUSTOMIZE_PY,
+        encoding="utf-8",
+    )
+    sitecustomize_parent = sitecustomize_path.parent
+    env["PYTHONPATH"] = (
+        f"{sitecustomize_parent}:{env.get('PYTHONPATH', '')}"
+        if env.get("PYTHONPATH")
+        else str(sitecustomize_parent)
+    )
+
     cmd = _bwrap_cmd(charm_root, workload) + [python_exe, str(charm_entrypoint)]
     proc = subprocess.run(cmd, capture_output=True, text=True, env=env)
 
@@ -603,6 +684,7 @@ def _status_for_app(app_name: str, app_state: dict[str, Any]) -> dict[str, Any]:
         "charm-name": app_name,
         "charm-rev": 0,
         "exposed": False,
+        "version": app_state.get("workload_version", ""),
         "application-status": {
             "current": current,
             "message": message,
