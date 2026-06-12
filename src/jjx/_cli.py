@@ -94,6 +94,11 @@ def teardown_all_models() -> None:
         _cmd_destroy_model.destroy_model([model_name])
 
 
+def _cleanup_placeholder_charm(path: Path) -> None:
+    if path.exists():
+        path.unlink()
+
+
 def jjx_pytest_env_args(charm_root: Path) -> list[str]:
     """Return uv-run args that keep jjx resolution consistent with launch mode."""
     charm_venv_dir = (charm_root / ".venv").absolute()
@@ -119,8 +124,8 @@ def jjx_cli() -> int:
     The `jjx` CLI can be run when the `jjx` package is installed in the charm's venv,
     or as a tool outside the charm's venv.
     """
-    # Handle explicit destroy command
-    if len(sys.argv) > 1 and sys.argv[1] == "destroy":
+    # Handle explicit down command.
+    if len(sys.argv) > 1 and sys.argv[1] == "down":
         teardown_all_models()
         return 0
 
@@ -145,13 +150,21 @@ def jjx_cli() -> int:
 
     try:
         proc = subprocess.run(cmd, env=env)
-        print("\nWorkload container is running")
+        container = _engine._running_workload_container()
+        if container is None:
+            teardown_all_models()
+            _cleanup_placeholder_charm(placeholder_charm)
+            return proc.returncode
+        print(
+            f"\nStarted workload container {container.name} with IP {container.ip_address}"
+            "\n\nPress Ctrl-C to tear down",
+            flush=True,
+        )
         signal.pause()
         return proc.returncode
     except KeyboardInterrupt:
         # Destroy all models on Ctrl+C
         print()
         teardown_all_models()
-        if placeholder_charm.exists():
-            placeholder_charm.unlink()
+        _cleanup_placeholder_charm(placeholder_charm)
         return 130  # Standard exit code for SIGINT

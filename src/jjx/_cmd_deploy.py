@@ -99,7 +99,7 @@ def deploy(args: list[str], model: str | None) -> int:
 
     state = _engine._load_state()
     if model is None and not state.get("models"):
-        model = "default"
+        model = "jjx-default"
         state.setdefault("models", {})[model] = {
             "created_at": _engine._now_iso(),
             "uuid": str(uuid.uuid4()),

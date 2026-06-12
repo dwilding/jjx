@@ -62,6 +62,15 @@ class CliError(Exception):
     exit_code: int = 1
 
 
+@dataclass(frozen=True)
+class ContainerDetails:
+    """Resolved Docker metadata for one workload container."""
+
+    name: str
+    ip_address: str
+    running: bool
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
@@ -156,7 +165,7 @@ def _require_model_name(state: dict[str, Any], model: str | None) -> str:
 
 def _sanitize_container_name(name: str) -> str:
     safe = re.sub(r"[^a-zA-Z0-9_.-]", "-", name)
-    return f"jjx-{safe}"[:128]
+    return safe[:128]
 
 
 def _split_resource(raw: str) -> tuple[str, str]:
@@ -276,14 +285,14 @@ def _docker_rm(container_name: str) -> None:
     )
 
 
-def _docker_container_ip(container_name: str) -> str:
+def _docker_container_details(container_name: str) -> ContainerDetails:
     try:
         proc = subprocess.run(
             [
                 "docker",
                 "inspect",
                 "--format",
-                "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
+                "{{.Name}}|{{.State.Running}}|{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
                 container_name,
             ],
             check=True,
@@ -292,12 +301,54 @@ def _docker_container_ip(container_name: str) -> str:
         )
     except subprocess.CalledProcessError as exc:
         raise CliError(
-            f"failed to get IP for container {container_name}: {exc.stderr.strip()}"
+            f"failed to inspect container {container_name}: {exc.stderr.strip()}"
         ) from None
-    ip = proc.stdout.strip()
-    if not ip:
-        raise CliError(f"container {container_name} has no IP address (is it running?)")
-    return ip
+
+    name, separator, remainder = proc.stdout.rstrip("\n").partition("|")
+    running_str, separator2, ip_address = remainder.partition("|")
+    if not separator or not separator2:
+        raise CliError(f"failed to inspect container {container_name}: unexpected docker output")
+
+    running_value = running_str.strip().lower()
+    if running_value not in {"true", "false"}:
+        raise CliError(f"failed to inspect container {container_name}: unexpected running state")
+
+    running = running_value == "true"
+    normalized_name = name.strip().lstrip("/") or container_name
+    ip_address = ip_address.strip()
+    if running and not ip_address:
+        raise CliError(f"container {normalized_name} has no IP address (is it running?)")
+
+    return ContainerDetails(
+        name=normalized_name,
+        ip_address=ip_address,
+        running=running,
+    )
+
+
+def _docker_container_ip(container_name: str) -> str:
+    return _docker_container_details(container_name).ip_address
+
+
+def _running_workload_container() -> ContainerDetails | None:
+    state = _load_state()
+    for model_state in state.get("models", {}).values():
+        apps = model_state.get("apps", {})
+        if not isinstance(apps, dict):
+            continue
+        for app_state in apps.values():
+            if not isinstance(app_state, dict):
+                continue
+            container_name = app_state.get("container_name")
+            if not isinstance(container_name, str) or not container_name:
+                continue
+            try:
+                container = _docker_container_details(container_name)
+            except CliError:
+                continue
+            if container.running:
+                return container
+    return None
 
 
 def _docker_list_model_containers(model_name: str) -> list[str]:
@@ -626,8 +677,10 @@ def _run_charm_event(
     container_name = app_state.get("container_name", "")
     if not container_name:
         raise CliError(f"application {app_name} has no container name in state")
-    container_ip = _docker_container_ip(container_name)
-    env["JJX_CONTAINER_IP"] = container_ip
+    container = _docker_container_details(container_name)
+    if not container.running:
+        raise CliError(f"container {container.name} is not running")
+    env["JJX_CONTAINER_IP"] = container.ip_address
 
     sitecustomize_path = _sitecustomize_path()
     sitecustomize_path.parent.mkdir(parents=True, exist_ok=True)
