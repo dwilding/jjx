@@ -9,8 +9,8 @@ import urllib.request
 PACKAGE_DIR = pathlib.Path(__file__).parent.parent.parent
 
 
-def wait_for_output_line(proc: subprocess.Popen[str], text: str, timeout: float = 90) -> str:
-    deadline = time.time() + timeout
+def wait_for_output_line(proc: subprocess.Popen[str], text: str) -> str:
+    deadline = time.time() + 10
     assert proc.stdout is not None
     while time.time() < deadline:
         line = proc.stdout.readline()
@@ -21,16 +21,6 @@ def wait_for_output_line(proc: subprocess.Popen[str], text: str, timeout: float 
         if text in line:
             return line.strip()
     raise AssertionError(f"did not find {text!r} in process output before timeout")
-
-
-def assert_connection_state(url: str, expect_up: bool) -> None:
-    try:
-        with urllib.request.urlopen(url, timeout=1):
-            pass
-    except urllib.error.URLError:
-        assert not expect_up
-        return
-    assert expect_up
 
 
 def assert_no_jjx_in_charm_venv(charm_dir: pathlib.Path) -> None:
@@ -45,7 +35,51 @@ def assert_no_jjx_in_charm_venv(charm_dir: pathlib.Path) -> None:
     )
 
 
+def assert_connection(url: str) -> None:
+    try:
+        with urllib.request.urlopen(url, timeout=1):
+            pass
+    except urllib.error.URLError:
+        raise AssertionError(f"expected connection to succeed for {url}")
+
+
+def assert_no_connection(url: str) -> None:
+    try:
+        with urllib.request.urlopen(url, timeout=1):
+            pass
+    except urllib.error.URLError:
+        return
+    raise AssertionError(f"expected connection to fail for {url}")
+
+
+def assert_container(container_name: str) -> None:
+    command = [
+        "docker",
+        "inspect",
+        container_name,
+    ]
+    subprocess.run(
+        command,
+        check=True,
+    )
+
+
+def assert_no_container(container_name: str) -> None:
+    command = [
+        "docker",
+        "inspect",
+        container_name,
+    ]
+    result = subprocess.run(
+        command,
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 1
+
+
 def test_uvx_jjx(k8s_2_configurable):
+    (k8s_2_configurable / "placeholder.charm").unlink()  # .charm file was created by the fixture.
     command = [
         "uvx",
         "--with-editable",
@@ -66,13 +100,17 @@ def test_uvx_jjx(k8s_2_configurable):
         container_name, _, container_ip = rest.partition(" with IP ")
         assert container_name.endswith("-fastapi-demo")
         assert container_ip
-        assert_connection_state(f"http://{container_ip}:8000", True)
-        assert_connection_state("http://127.0.0.1:8000", False)
+        assert_connection(f"http://{container_ip}:8000")
+        assert_no_connection("http://127.0.0.1:8000")
         assert_no_jjx_in_charm_venv(k8s_2_configurable)
         # Teardown
         proc.send_signal(signal.SIGINT)
         assert proc.wait(timeout=5) == 130
-        assert_connection_state(f"http://{container_ip}:8000", False)
+        assert proc.stdout is not None
+        assert f"Stopped {container_name}" in proc.stdout.read()
+        assert_no_container(container_name)
+        assert not (k8s_2_configurable / ".jjx").exists()
+        assert not (k8s_2_configurable / "placeholder.charm").exists()
     finally:
         if proc.poll() is None:
             proc.kill()
@@ -117,7 +155,62 @@ def test_uv_run_jjx(k8s_2_configurable):
             proc.kill()
 
 
-# TODO: manually set up a running workload container then test that `jjx down` tears it down
+def test_jjx_down(k8s_2_configurable):
+    (k8s_2_configurable / "placeholder.charm").touch()
+    command = [
+        "uv",
+        "run",
+        "--group",
+        "integration",
+        "pytest",
+        "-v",
+        "tests/integration",
+        "--no-juju-teardown",
+    ]  # jjx is already installed, from a previous test.
+    result = subprocess.run(
+        command,
+        cwd=k8s_2_configurable,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    model_name = result.stdout.split("--juju-model ")[1].split()[0]
+    container_name = f"{model_name}-test-charm-fastapi-demo"
+    assert_container(container_name)
+    command = [
+        "uv",
+        "run",
+        "jjx",
+        "down",
+    ]
+    result = subprocess.run(
+        command,
+        cwd=k8s_2_configurable,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert f"Stopped {container_name}" in result.stdout
+    assert_no_container(container_name)
+    assert not (k8s_2_configurable / ".jjx").exists()
+    assert (k8s_2_configurable / "placeholder.charm").exists()  # 'jjx down' ignores .charm files.
 
 
-# TODO: break the integration test and check that jjx exits immediately
+def test_jjx_no_deploy(k8s_2_configurable):
+    test_file = k8s_2_configurable / "tests" / "integration" / "test_charm.py"
+    code = test_file.read_text()
+    code = code.replace("juju.deploy", "juju.dont_deploy")  # Break the charm's integration tests.
+    test_file.write_text(code)
+    command = [
+        "uv",
+        "run",
+        "jjx",
+    ]  # jjx is already installed, from a previous test.
+    result = subprocess.run(
+        command,
+        cwd=k8s_2_configurable,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 1
+    assert "Started workload container " not in result.stdout

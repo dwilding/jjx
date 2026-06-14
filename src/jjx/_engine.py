@@ -283,6 +283,7 @@ def _docker_rm(container_name: str) -> None:
         capture_output=True,
         text=True,
     )
+    print(f"Stopped {container_name}")
 
 
 def _docker_container_details(container_name: str) -> ContainerDetails:
@@ -464,11 +465,53 @@ def _wait_for_socket(socket_path: Path, timeout: float = 20.0) -> None:
     raise CliError(f"timed out waiting for pebble socket: {socket_path}")
 
 
+def _project_venv_python() -> Path | None:
+    venv_bin = _project_root() / ".venv" / "bin"
+    for name in ("python3", "python"):
+        candidate = venv_bin / name
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _project_venv_bin() -> Path | None:
+    venv_bin = _project_root() / ".venv" / "bin"
+    if venv_bin.is_dir():
+        return venv_bin
+    return None
+
+
+def _python_can_import_jjx(python_exe: Path) -> bool:
+    result = subprocess.run(
+        [str(python_exe), "-c", "import jjx"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return result.returncode == 0
+
+
 def _python_executable() -> str:
-    python_exe = sys.executable
-    if python_exe and Path(python_exe).exists():
-        return python_exe
-    raise CliError(f"sys.executable is not usable: {python_exe!r}")
+    project_python = _project_venv_python()
+    if project_python and _python_can_import_jjx(project_python):
+        return str(project_python)
+
+    python_exe = Path(sys.executable)
+    if python_exe.exists() and _python_can_import_jjx(python_exe):
+        return str(python_exe)
+    raise CliError(
+        f"no usable Python runtime for jjx hook tools (sys.executable={sys.executable!r})"
+    )
+
+
+def _charm_python_executable() -> str:
+    project_python = _project_venv_python()
+    if project_python is not None:
+        return str(project_python)
+
+    python_exe = Path(sys.executable)
+    if python_exe.exists():
+        return str(python_exe)
+    raise CliError(f"sys.executable is not usable: {sys.executable!r}")
 
 
 def _ensure_hook_tools(python_exe: str) -> None:
@@ -572,7 +615,12 @@ def _build_charm_env(
     else:
         env.pop("JUJU_WORKLOAD_NAME", None)
 
-    env["PATH"] = f"{_hook_tools_dir()}:{env.get('PATH', '')}"
+    path_entries = [str(_hook_tools_dir())]
+    project_venv_bin = _project_venv_bin()
+    if project_venv_bin is not None:
+        path_entries.append(str(project_venv_bin))
+    path_entries.append(env.get("PATH", ""))
+    env["PATH"] = ":".join(entry for entry in path_entries if entry)
     return env
 
 
@@ -643,8 +691,9 @@ def _run_charm_event(
     _ensure_runtime_layout(app_state)
     _save_state(state)
 
-    python_exe = _python_executable()
-    _ensure_hook_tools(python_exe)
+    hook_tool_python = _python_executable()
+    _ensure_hook_tools(hook_tool_python)
+    charm_python = _charm_python_executable()
 
     runtime = app_state.get("runtime") or {}
     charm_root = Path(runtime.get("charm_dir", app_state["charm_source"])).resolve()
@@ -695,7 +744,7 @@ def _run_charm_event(
         else str(sitecustomize_parent)
     )
 
-    cmd = _bwrap_cmd(charm_root, workload) + [python_exe, str(charm_entrypoint)]
+    cmd = _bwrap_cmd(charm_root, workload) + [charm_python, str(charm_entrypoint)]
     proc = subprocess.run(cmd, capture_output=True, text=True, env=env)
 
     state = _load_state()
