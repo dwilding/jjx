@@ -116,7 +116,32 @@ def test_uvx_jjx(k8s_2_configurable):
             proc.kill()
 
 
-# TODO: test uvx jjx again, this time setting a port mapping with -p
+def test_uvx_jjx_publish(k8s_2_configurable):
+    command = [
+        "uvx",
+        "--with-editable",
+        PACKAGE_DIR,
+        "jjx",
+        "-p",
+        "8135:8000",
+    ]
+    proc = subprocess.Popen(
+        command,
+        cwd=k8s_2_configurable,
+        env={**os.environ, "PYTHONUNBUFFERED": "1"},
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    try:
+        wait_for_output_line(proc, "Published container port 8000 to 127.0.0.1:8135")
+        assert_connection("http://127.0.0.1:8135")
+        # Teardown
+        proc.send_signal(signal.SIGINT)
+        assert proc.wait(timeout=5) == 130
+    finally:
+        if proc.poll() is None:
+            proc.kill()
 
 
 def test_uv_run_jjx(k8s_2_configurable):

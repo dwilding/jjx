@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import re
 import signal
 import subprocess
 import sys
@@ -129,6 +130,19 @@ def jjx_cli() -> int:
         teardown_all_models()
         return 0
 
+    # Extract -p flag for Docker port publishing.
+    docker_publish = None
+    publish_output = ""
+    if "-p" in sys.argv:
+        idx = sys.argv.index("-p")
+        if idx + 1 < len(sys.argv):
+            docker_publish = sys.argv[idx + 1]
+            if not re.match(r"^\d+:\d+$", docker_publish):
+                sys.stderr.write(
+                    f"ERROR: Invalid port format '{docker_publish}': expected <number>:<number>\n"
+                )
+                return 2
+
     charm_root = _engine._project_root()
     placeholder_charm = charm_root / "placeholder.charm"
     if not placeholder_charm.exists():
@@ -136,7 +150,12 @@ def jjx_cli() -> int:
 
     env = os.environ.copy()
     env["CHARM_PATH"] = str(placeholder_charm)
-
+    if docker_publish:
+        env["JJX_DOCKER_PUBLISH"] = docker_publish
+        external_port, internal_port = docker_publish.split(":", 1)
+        publish_output = (
+            f"\n\nPublished container port {internal_port} to 127.0.0.1:{external_port}"
+        )
     cmd = [
         "uv",
         "run",
@@ -156,7 +175,7 @@ def jjx_cli() -> int:
             _cleanup_placeholder_charm(placeholder_charm)
             return proc.returncode
         print(
-            f"\nStarted workload container {container.name} with IP {container.ip_address}"
+            f"\nStarted workload container {container.name} with IP {container.ip_address}{publish_output}"
             "\n\nPress Ctrl-C to tear down",
             flush=True,
         )
