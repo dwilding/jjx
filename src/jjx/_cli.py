@@ -9,6 +9,11 @@ import signal
 import subprocess
 import sys
 
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    import tomli as tomllib  # ty: ignore[unresolved-import]
+
 from . import (
     _cmd_add_model,
     _cmd_config,
@@ -119,6 +124,29 @@ def jjx_pytest_env_args(charm_root: Path) -> list[str]:
     return ["--with", "jjx"]
 
 
+def jjx_pytest_args(charm_root: Path) -> list[str]:
+    """Return pytest args from [tool.jjx].pytest-args, or defaults if unset."""
+    default_args = ["tests/integration", "--no-juju-teardown"]
+    pyproject = charm_root / "pyproject.toml"
+    if not pyproject.exists():
+        return default_args
+
+    try:
+        with pyproject.open("rb") as fp:
+            config = tomllib.load(fp)
+    except tomllib.TOMLDecodeError as exc:
+        raise _engine.CliError(f"ERROR: Invalid pyproject.toml: {exc}") from exc
+
+    pytest_args = config.get("tool", {}).get("jjx", {}).get("pytest-args")
+    if pytest_args is None:
+        return default_args
+
+    if not isinstance(pytest_args, list) or not all(isinstance(arg, str) for arg in pytest_args):
+        raise _engine.CliError("ERROR: [tool.jjx].pytest-args must be an array of strings")
+
+    return pytest_args
+
+
 def jjx_cli() -> int:
     """Run the `jjx` CLI and return an exit code.
 
@@ -144,6 +172,13 @@ def jjx_cli() -> int:
                 return 2
 
     charm_root = _engine._project_root()
+    try:
+        pytest_args = jjx_pytest_args(charm_root)
+    except _engine.CliError as exc:
+        if exc.message:
+            sys.stderr.write(exc.message + "\n")
+        return exc.exit_code
+
     placeholder_charm = charm_root / "placeholder.charm"
     if not placeholder_charm.exists():
         placeholder_charm.touch()
@@ -163,8 +198,7 @@ def jjx_cli() -> int:
         "--group",
         "integration",
         "pytest",
-        "tests/integration",
-        "--no-juju-teardown",
+        *pytest_args,
     ]
 
     try:

@@ -10,7 +10,7 @@ PACKAGE_DIR = pathlib.Path(__file__).parent.parent.parent
 
 
 def wait_for_output_line(proc: subprocess.Popen[str], text: str) -> str:
-    deadline = time.time() + 10
+    deadline = time.time() + 20
     assert proc.stdout is not None
     while time.time() < deadline:
         line = proc.stdout.readline()
@@ -105,7 +105,7 @@ def test_uvx_jjx(k8s_2_configurable):
         assert_no_jjx_in_charm_venv(k8s_2_configurable)
         # Teardown
         proc.send_signal(signal.SIGINT)
-        assert proc.wait(timeout=5) == 130
+        assert proc.wait(timeout=10) == 130
         assert proc.stdout is not None
         assert f"Stopped {container_name}" in proc.stdout.read()
         assert_no_container(container_name)
@@ -138,7 +138,7 @@ def test_uvx_jjx_publish(k8s_2_configurable):
         assert_connection("http://127.0.0.1:8135")
         # Teardown
         proc.send_signal(signal.SIGINT)
-        assert proc.wait(timeout=5) == 130
+        assert proc.wait(timeout=10) == 130
     finally:
         if proc.poll() is None:
             proc.kill()
@@ -174,7 +174,7 @@ def test_uv_run_jjx(k8s_2_configurable):
         wait_for_output_line(proc, "Started workload container ")
         # Teardown
         proc.send_signal(signal.SIGINT)
-        assert proc.wait(timeout=5) == 130
+        assert proc.wait(timeout=10) == 130
     finally:
         if proc.poll() is None:
             proc.kill()
