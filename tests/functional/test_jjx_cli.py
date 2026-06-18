@@ -79,7 +79,6 @@ def assert_no_container(container_name: str) -> None:
 
 
 def test_uvx_jjx(k8s_2_configurable):
-    (k8s_2_configurable / "placeholder.charm").unlink()  # .charm file was created by the fixture.
     command = [
         "uvx",
         "--with-editable",
@@ -102,15 +101,15 @@ def test_uvx_jjx(k8s_2_configurable):
         assert container_ip
         assert_connection(f"http://{container_ip}:8000")
         assert_no_connection("http://127.0.0.1:8000")
+        assert not (k8s_2_configurable / "placeholder.charm").exists()
         assert_no_jjx_in_charm_venv(k8s_2_configurable)
-        # Teardown
+        # TEARDOWN
         proc.send_signal(signal.SIGINT)
         assert proc.wait(timeout=10) == 130
         assert proc.stdout is not None
-        assert f"Stopped {container_name}" in proc.stdout.read()
+        assert f"Removed container {container_name}" in proc.stdout.read()
         assert_no_container(container_name)
         assert not (k8s_2_configurable / ".jjx").exists()
-        assert not (k8s_2_configurable / "placeholder.charm").exists()
     finally:
         if proc.poll() is None:
             proc.kill()
@@ -136,7 +135,7 @@ def test_uvx_jjx_publish(k8s_2_configurable):
     try:
         wait_for_output_line(proc, "Published container port 8000 to 127.0.0.1:8135")
         assert_connection("http://127.0.0.1:8135")
-        # Teardown
+        # TEARDOWN
         proc.send_signal(signal.SIGINT)
         assert proc.wait(timeout=10) == 130
     finally:
@@ -172,7 +171,7 @@ def test_uv_run_jjx(k8s_2_configurable):
     )
     try:
         wait_for_output_line(proc, "Started workload container ")
-        # Teardown
+        # TEARDOWN
         proc.send_signal(signal.SIGINT)
         assert proc.wait(timeout=10) == 130
     finally:
@@ -180,18 +179,13 @@ def test_uv_run_jjx(k8s_2_configurable):
             proc.kill()
 
 
-def test_jjx_down(k8s_2_configurable):
-    (k8s_2_configurable / "placeholder.charm").touch()
+def test_jjx_detach_then_down(k8s_2_configurable):
     command = [
         "uv",
         "run",
-        "--group",
-        "integration",
-        "pytest",
-        "-v",
-        "tests/integration",
-        "--no-juju-teardown",
-    ]  # jjx is already installed, from a previous test.
+        "jjx",
+        "-d",
+    ]
     result = subprocess.run(
         command,
         cwd=k8s_2_configurable,
@@ -201,7 +195,10 @@ def test_jjx_down(k8s_2_configurable):
     )
     model_name = result.stdout.split("--juju-model ")[1].split()[0]
     container_name = f"{model_name}-test-charm-fastapi-demo"
+    assert f"Started workload container {container_name}" in result.stdout
     assert_container(container_name)
+    assert not (k8s_2_configurable / "placeholder.charm").exists()
+    # TEARDOWN
     command = [
         "uv",
         "run",
@@ -215,22 +212,121 @@ def test_jjx_down(k8s_2_configurable):
         capture_output=True,
         text=True,
     )
-    assert f"Stopped {container_name}" in result.stdout
+    assert f"Removed container {container_name}" in result.stdout
     assert_no_container(container_name)
     assert not (k8s_2_configurable / ".jjx").exists()
-    assert (k8s_2_configurable / "placeholder.charm").exists()  # 'jjx down' ignores .charm files.
 
 
-def test_jjx_no_deploy(k8s_2_configurable):
-    test_file = k8s_2_configurable / "tests" / "integration" / "test_charm.py"
-    code = test_file.read_text()
-    code = code.replace("juju.deploy", "juju.dont_deploy")  # Break the charm's integration tests.
-    test_file.write_text(code)
+def test_jjx_detach_then_rerun(k8s_2_configurable):
     command = [
         "uv",
         "run",
         "jjx",
-    ]  # jjx is already installed, from a previous test.
+        "-d",
+    ]
+    subprocess.run(
+        command,
+        cwd=k8s_2_configurable,
+        check=True,
+    )
+    result = subprocess.run(
+        command,
+        cwd=k8s_2_configurable,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 1
+    assert "Started workload container " not in result.stdout
+    assert " is up" in result.stderr
+    # TEARDOWN
+    command = [
+        "uv",
+        "run",
+        "jjx",
+        "down",
+    ]
+    result = subprocess.run(
+        command,
+        cwd=k8s_2_configurable,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert result.stdout.count("Removed container ") == 1
+
+
+def test_jjx_pytest_fail(k8s_2_configurable):
+    # Add a failing integration test.
+    test_charm = k8s_2_configurable / "tests" / "integration" / "test_charm.py"
+    test_charm.write_text(
+        test_charm.read_text()
+        + '\n\ndef test_always_fails():\n    raise AssertionError("deliberate failure")\n'
+    )
+    command = [
+        "uv",
+        "run",
+        "jjx",
+        "-d",
+    ]
+    result = subprocess.run(
+        command,
+        cwd=k8s_2_configurable,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 1
+    # The container should still be running because `test_deploy` should have passed.
+    assert "Started workload container " in result.stdout
+    # TEARDOWN
+    command = [
+        "uv",
+        "run",
+        "jjx",
+        "down",
+    ]
+    result = subprocess.run(
+        command,
+        cwd=k8s_2_configurable,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "Removed container " in result.stdout
+
+
+def test_jjx_pytest_select_and_teardown(k8s_2_configurable):
+    pytest_args = '["tests/integration", "-k", "test_deploy"]'  # Dropped --no-juju-teardown.
+    pyproject = k8s_2_configurable / "pyproject.toml"
+    pyproject.write_text(pyproject.read_text() + f"\n[tool.jjx]\npytest-args = {pytest_args}\n")
+    command = [
+        "uv",
+        "run",
+        "jjx",
+    ]
+    result = subprocess.run(
+        command,
+        cwd=k8s_2_configurable,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "Started workload container " not in result.stdout
+
+
+def test_jjx_no_deploy(k8s_2_configurable):
+    # Restore --no-juju-teardown.
+    pyproject = k8s_2_configurable / "pyproject.toml"
+    pyproject.write_text(
+        pyproject.read_text().replace('"test_deploy"', '"test_deploy", "--no-juju-teardown"')
+    )
+    # Break the integration test that deploys the charm.
+    test_charm = k8s_2_configurable / "tests" / "integration" / "test_charm.py"
+    test_charm.write_text(test_charm.read_text().replace("juju.deploy", "juju.dont_deploy"))
+    command = [
+        "uv",
+        "run",
+        "jjx",
+    ]
     result = subprocess.run(
         command,
         cwd=k8s_2_configurable,

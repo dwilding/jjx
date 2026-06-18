@@ -100,11 +100,6 @@ def teardown_all_models() -> None:
         _cmd_destroy_model.destroy_model([model_name])
 
 
-def _cleanup_placeholder_charm(path: Path) -> None:
-    if path.exists():
-        path.unlink()
-
-
 def jjx_pytest_env_args(charm_root: Path) -> list[str]:
     """Return uv-run args that keep jjx resolution consistent with launch mode."""
     charm_venv_dir = (charm_root / ".venv").absolute()
@@ -158,6 +153,16 @@ def jjx_cli() -> int:
         teardown_all_models()
         return 0
 
+    # Preflight: clean up any stale state from a previous run.
+    if (_engine._project_root() / _engine.STATE_DIR_NAME).exists():
+        running = _engine._running_workload_container()
+        if running is not None:
+            sys.stderr.write(f"Container {running.name} is up\nRun 'jjx down' to tear down\n")
+            return 1
+        teardown_all_models()
+
+    detach = "-d" in sys.argv
+
     # Extract -p flag for Docker port publishing.
     docker_publish = None
     publish_output = ""
@@ -180,8 +185,7 @@ def jjx_cli() -> int:
         return exc.exit_code
 
     placeholder_charm = charm_root / "placeholder.charm"
-    if not placeholder_charm.exists():
-        placeholder_charm.touch()
+    placeholder_charm.touch()
 
     env = os.environ.copy()
     env["CHARM_PATH"] = str(placeholder_charm)
@@ -203,21 +207,23 @@ def jjx_cli() -> int:
 
     try:
         proc = subprocess.run(cmd, env=env)
+        placeholder_charm.unlink()
         container = _engine._running_workload_container()
         if container is None:
             teardown_all_models()
-            _cleanup_placeholder_charm(placeholder_charm)
             return proc.returncode
         print(
-            f"\nStarted workload container {container.name} with IP {container.ip_address}{publish_output}"
-            "\n\nPress Ctrl-C to tear down",
+            f"\nStarted workload container {container.name} with IP {container.ip_address}{publish_output}",
             flush=True,
         )
+        if detach:
+            print("\nRun 'jjx down' to tear down")
+            return proc.returncode
+        print("\nPress Ctrl-C to tear down", flush=True)
         signal.pause()
         return proc.returncode
     except KeyboardInterrupt:
         # Destroy all models on Ctrl+C
         print()
         teardown_all_models()
-        _cleanup_placeholder_charm(placeholder_charm)
         return 130  # Standard exit code for SIGINT

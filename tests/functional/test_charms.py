@@ -6,15 +6,23 @@ PACKAGE_DIR = pathlib.Path(__file__).parent.parent.parent
 
 def test_charm(charm_dir):
     command = [
-        "uv",
-        "run",
-        "--group",
-        "integration",
+        "uvx",
         "--with-editable",
         PACKAGE_DIR,
-        "pytest",
-        "-v",
-        "tests/integration",
+        "jjx",
+        "-d",
+    ]
+    subprocess.run(
+        command,
+        cwd=charm_dir,
+        check=True,
+    )
+    command = [
+        "uvx",
+        "--with-editable",
+        PACKAGE_DIR,
+        "jjx",
+        "down",
     ]
     subprocess.run(
         command,

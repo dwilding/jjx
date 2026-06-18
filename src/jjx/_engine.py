@@ -283,7 +283,7 @@ def _docker_rm(container_name: str) -> None:
         capture_output=True,
         text=True,
     )
-    print(f"Stopped {container_name}")
+    print(f"Removed container {container_name}")
 
 
 def _docker_container_details(container_name: str) -> ContainerDetails:

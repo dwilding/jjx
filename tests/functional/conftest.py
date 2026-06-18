@@ -34,17 +34,16 @@ def temp_dir():
     shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
-def ignore_hidden_or_private(_, names: list[str]) -> set[str]:
-    return {name for name in names if name.startswith((".", "_"))}
+def ignore_non_source(_, names: list[str]) -> set[str]:
+    return {name for name in names if name.startswith((".", "_")) or name.endswith(".charm")}
 
 
 def prepare_charm_dir(source_dir: pathlib.Path, target_dir: pathlib.Path) -> None:
     shutil.copytree(
         source_dir,
         target_dir,
-        ignore=ignore_hidden_or_private,
+        ignore=ignore_non_source,
     )
-    (target_dir / "placeholder.charm").touch()  # "Pack" the charm.
 
 
 @pytest.fixture(scope="module", params=CHARM_PARAMS)
