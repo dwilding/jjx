@@ -238,6 +238,7 @@ def test_jjx_detach_then_rerun(k8s_2_configurable):
     assert result.returncode == 1
     assert "Started workload container " not in result.stdout
     assert " is up" in result.stderr
+    assert (k8s_2_configurable / ".jjx").exists()
     # TEARDOWN
     command = [
         "uv",
@@ -277,6 +278,7 @@ def test_jjx_pytest_fail(k8s_2_configurable):
     assert result.returncode == 1
     # The container should still be running because `test_deploy` should have passed.
     assert "Started workload container " in result.stdout
+    assert (k8s_2_configurable / ".jjx").exists()
     # TEARDOWN
     command = [
         "uv",
@@ -311,6 +313,7 @@ def test_jjx_pytest_select_and_teardown(k8s_2_configurable):
         text=True,
     )
     assert "Started workload container " not in result.stdout
+    assert not (k8s_2_configurable / ".jjx").exists()
 
 
 def test_jjx_no_deploy(k8s_2_configurable):
@@ -335,3 +338,4 @@ def test_jjx_no_deploy(k8s_2_configurable):
     )
     assert result.returncode == 1
     assert "Started workload container " not in result.stdout
+    assert not (k8s_2_configurable / ".jjx").exists()

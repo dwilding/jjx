@@ -159,7 +159,7 @@ def jjx_cli() -> int:
         if running is not None:
             sys.stderr.write(f"Container {running.name} is up\nRun 'jjx down' to tear down\n")
             return 1
-        teardown_all_models()
+    teardown_all_models()
 
     detach = "-d" in sys.argv
 
