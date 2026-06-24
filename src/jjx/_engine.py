@@ -62,6 +62,15 @@ class CliError(Exception):
     exit_code: int = 1
 
 
+@dataclass(frozen=True)
+class ContainerDetails:
+    """Resolved Docker metadata for one workload container."""
+
+    name: str
+    ip_address: str
+    running: bool
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
@@ -156,7 +165,7 @@ def _require_model_name(state: dict[str, Any], model: str | None) -> str:
 
 def _sanitize_container_name(name: str) -> str:
     safe = re.sub(r"[^a-zA-Z0-9_.-]", "-", name)
-    return f"jjx-{safe}"[:128]
+    return safe[:128]
 
 
 def _split_resource(raw: str) -> tuple[str, str]:
@@ -274,16 +283,17 @@ def _docker_rm(container_name: str) -> None:
         capture_output=True,
         text=True,
     )
+    print(f"Removed container {container_name}")
 
 
-def _docker_container_ip(container_name: str) -> str:
+def _docker_container_details(container_name: str) -> ContainerDetails:
     try:
         proc = subprocess.run(
             [
                 "docker",
                 "inspect",
                 "--format",
-                "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
+                "{{.Name}}|{{.State.Running}}|{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
                 container_name,
             ],
             check=True,
@@ -292,12 +302,54 @@ def _docker_container_ip(container_name: str) -> str:
         )
     except subprocess.CalledProcessError as exc:
         raise CliError(
-            f"failed to get IP for container {container_name}: {exc.stderr.strip()}"
+            f"failed to inspect container {container_name}: {exc.stderr.strip()}"
         ) from None
-    ip = proc.stdout.strip()
-    if not ip:
-        raise CliError(f"container {container_name} has no IP address (is it running?)")
-    return ip
+
+    name, separator, remainder = proc.stdout.rstrip("\n").partition("|")
+    running_str, separator2, ip_address = remainder.partition("|")
+    if not separator or not separator2:
+        raise CliError(f"failed to inspect container {container_name}: unexpected docker output")
+
+    running_value = running_str.strip().lower()
+    if running_value not in {"true", "false"}:
+        raise CliError(f"failed to inspect container {container_name}: unexpected running state")
+
+    running = running_value == "true"
+    normalized_name = name.strip().lstrip("/") or container_name
+    ip_address = ip_address.strip()
+    if running and not ip_address:
+        raise CliError(f"container {normalized_name} has no IP address (is it running?)")
+
+    return ContainerDetails(
+        name=normalized_name,
+        ip_address=ip_address,
+        running=running,
+    )
+
+
+def _docker_container_ip(container_name: str) -> str:
+    return _docker_container_details(container_name).ip_address
+
+
+def _running_workload_container() -> ContainerDetails | None:
+    state = _load_state()
+    for model_state in state.get("models", {}).values():
+        apps = model_state.get("apps", {})
+        if not isinstance(apps, dict):
+            continue
+        for app_state in apps.values():
+            if not isinstance(app_state, dict):
+                continue
+            container_name = app_state.get("container_name")
+            if not isinstance(container_name, str) or not container_name:
+                continue
+            try:
+                container = _docker_container_details(container_name)
+            except CliError:
+                continue
+            if container.running:
+                return container
+    return None
 
 
 def _docker_list_model_containers(model_name: str) -> list[str]:
@@ -413,11 +465,53 @@ def _wait_for_socket(socket_path: Path, timeout: float = 20.0) -> None:
     raise CliError(f"timed out waiting for pebble socket: {socket_path}")
 
 
+def _project_venv_python() -> Path | None:
+    venv_bin = _project_root() / ".venv" / "bin"
+    for name in ("python3", "python"):
+        candidate = venv_bin / name
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _project_venv_bin() -> Path | None:
+    venv_bin = _project_root() / ".venv" / "bin"
+    if venv_bin.is_dir():
+        return venv_bin
+    return None
+
+
+def _python_can_import_jjx(python_exe: Path) -> bool:
+    result = subprocess.run(
+        [str(python_exe), "-c", "import jjx"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return result.returncode == 0
+
+
 def _python_executable() -> str:
-    python_exe = sys.executable
-    if python_exe and Path(python_exe).exists():
-        return python_exe
-    raise CliError(f"sys.executable is not usable: {python_exe!r}")
+    project_python = _project_venv_python()
+    if project_python and _python_can_import_jjx(project_python):
+        return str(project_python)
+
+    python_exe = Path(sys.executable)
+    if python_exe.exists() and _python_can_import_jjx(python_exe):
+        return str(python_exe)
+    raise CliError(
+        f"no usable Python runtime for jjx hook tools (sys.executable={sys.executable!r})"
+    )
+
+
+def _charm_python_executable() -> str:
+    project_python = _project_venv_python()
+    if project_python is not None:
+        return str(project_python)
+
+    python_exe = Path(sys.executable)
+    if python_exe.exists():
+        return str(python_exe)
+    raise CliError(f"sys.executable is not usable: {sys.executable!r}")
 
 
 def _ensure_hook_tools(python_exe: str) -> None:
@@ -434,7 +528,12 @@ def _ensure_hook_tools(python_exe: str) -> None:
     for tool in tools:
         path = root / tool
         path.write_text(
-            (f'#!/bin/sh\nexec {python_exe} -m jjx._cli _hook-tool {tool} "$@"\n'),
+            (
+                "#!/bin/sh\n"
+                f'exec "{python_exe}" -c \'import sys; '
+                "import jjx; "
+                f'raise SystemExit(jjx.run_hook_tool("{tool}", sys.argv[1:]))\' "$@"\n'
+            ),
             encoding="utf-8",
         )
         path.chmod(0o755)
@@ -516,7 +615,12 @@ def _build_charm_env(
     else:
         env.pop("JUJU_WORKLOAD_NAME", None)
 
-    env["PATH"] = f"{_hook_tools_dir()}:{env.get('PATH', '')}"
+    path_entries = [str(_hook_tools_dir())]
+    project_venv_bin = _project_venv_bin()
+    if project_venv_bin is not None:
+        path_entries.append(str(project_venv_bin))
+    path_entries.append(env.get("PATH", ""))
+    env["PATH"] = ":".join(entry for entry in path_entries if entry)
     return env
 
 
@@ -587,8 +691,9 @@ def _run_charm_event(
     _ensure_runtime_layout(app_state)
     _save_state(state)
 
-    python_exe = _python_executable()
-    _ensure_hook_tools(python_exe)
+    hook_tool_python = _python_executable()
+    _ensure_hook_tools(hook_tool_python)
+    charm_python = _charm_python_executable()
 
     runtime = app_state.get("runtime") or {}
     charm_root = Path(runtime.get("charm_dir", app_state["charm_source"])).resolve()
@@ -621,8 +726,10 @@ def _run_charm_event(
     container_name = app_state.get("container_name", "")
     if not container_name:
         raise CliError(f"application {app_name} has no container name in state")
-    container_ip = _docker_container_ip(container_name)
-    env["JJX_CONTAINER_IP"] = container_ip
+    container = _docker_container_details(container_name)
+    if not container.running:
+        raise CliError(f"container {container.name} is not running")
+    env["JJX_CONTAINER_IP"] = container.ip_address
 
     sitecustomize_path = _sitecustomize_path()
     sitecustomize_path.parent.mkdir(parents=True, exist_ok=True)
@@ -637,7 +744,7 @@ def _run_charm_event(
         else str(sitecustomize_parent)
     )
 
-    cmd = _bwrap_cmd(charm_root, workload) + [python_exe, str(charm_entrypoint)]
+    cmd = _bwrap_cmd(charm_root, workload) + [charm_python, str(charm_entrypoint)]
     proc = subprocess.run(cmd, capture_output=True, text=True, env=env)
 
     state = _load_state()

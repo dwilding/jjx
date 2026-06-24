@@ -40,8 +40,10 @@ def test_server_process(k8s_2_configurable):
     ]
     subprocess.run(
         command,
-        check=False,
+        check=False,  # Ignore a missing container (good enough for now).
     )
+    # "Pack" the charm.
+    (k8s_2_configurable / "placeholder.charm").touch()
     # Deploy the app.
     command = [
         *JUJU,

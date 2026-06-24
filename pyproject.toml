@@ -10,10 +10,12 @@ license-files = ["LICENSE"]
 requires-python = ">= 3.10"
 dependencies = [
     "PyYAML>=6,<7",
+    "tomli>=2,<3; python_version<'3.11'",
 ]
 
 [project.scripts]
-juju = "jjx._cli:main"
+jjx = "jjx._cli:jjx_cli"
+juju = "jjx._cli:juju_cli"
 
 [dependency-groups]
 dev = [
