@@ -1,6 +1,7 @@
 Runtime dependencies:
 
 - [PyYAML](https://github.com/yaml/pyyaml/releases)
+- [tomli](https://github.com/hukkin/tomli/blob/master/CHANGELOG.md) (Python 3.10 only)
 
 Development dependencies:
 
