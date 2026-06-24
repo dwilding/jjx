@@ -12,7 +12,7 @@ jobs:
   functional:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.0.3
         with:
           persist-credentials: false
       - name: Install bubblewrap
@@ -33,9 +33,9 @@ jobs:
           sudo apparmor_parser -r /etc/apparmor.d/jjx-bwrap
           bwrap --ro-bind / / --dev /dev --proc /proc -- true
       - name: Install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39  # v8.2.0
       - name: Run functional tests
         env:
           UV_PYTHON: '3.10'
         shell: bash
-        run: uvx --from rust-just just functional
+        run: uvx --from rust-just@1.52.0 just functional

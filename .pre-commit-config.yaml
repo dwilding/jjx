@@ -10,6 +10,18 @@ repos:
       - id: check-toml
   - repo: local
     hooks:
+      - id: deps
+        name: Check uv.lock
+        entry: uv lock --check
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: zizmor
+        name: Run zizmor
+        entry: uv run zizmor .
+        language: system
+        pass_filenames: false
+        always_run: true
       - id: just-lint
         name: Run 'just lint'
         entry: just lint
@@ -19,12 +31,6 @@ repos:
       - id: just-unit
         name: Run 'just unit'
         entry: just unit
-        language: system
-        pass_filenames: false
-        always_run: true
-      - id: just-zizmor
-        name: Run 'just zizmor'
-        entry: just zizmor
         language: system
         pass_filenames: false
         always_run: true
