@@ -1,16 +1,16 @@
 [project]
 name = "jjx"
 version = "0.2.2"
-description = "A Juju test adapter for simple Kubernetes charms on Docker."
+description = "A Juju-on-Docker test adapter for simple Kubernetes charms."
 authors = [
     { name = "Dave Wilding", email = "tech@dpw.me" },
 ]
 license = "MIT"
 license-files = ["LICENSE"]
-requires-python = ">= 3.10"
+requires-python = ">=3.10"
 dependencies = [
-    "PyYAML>=6,<7",
-    "tomli>=2,<3; python_version<'3.11'",
+    "PyYAML==6.0.3",
+    "tomli==2.4.1; python_version<'3.11'",
 ]
 
 [project.scripts]
@@ -19,15 +19,15 @@ juju = "jjx._cli:juju_cli"
 
 [dependency-groups]
 dev = [
-    "ruff>=0.15.12,<1",
-    "pytest>=9,<10",
-    "ty>=0.0.35,<1",
-    "zizmor>=1,<2",
+    "ruff==0.15.16",
+    "pytest==9.0.3",
+    "ty==0.0.44",
+    "zizmor==1.25.2",
 ]
 
 [build-system]
 requires = [
-    "uv_build>=0.11.14,<1",
+    "uv_build==0.11.19",
 ]
 build-backend = "uv_build"
 

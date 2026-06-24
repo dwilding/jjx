@@ -1,8 +1,11 @@
+set ignore-comments
+
 [private]
 default:
   @just --summary --unsorted
 
 format:
+  uv run ruff check --fix
   uv run ruff format
 
 lint:
@@ -19,5 +22,12 @@ test args="tests/unit tests/functional":
   uv run pytest -vv {{args}}
 
 [private]
-zizmor:
-  uv run zizmor --format=sarif . > workflows.sarif
+charms:
+  #!/bin/bash
+  set -euo pipefail
+  rm -rf tests/functional/charms/*
+  git clone --depth 1 --single-branch https://github.com/canonical/operator.git
+  cp -r operator/examples/httpbin-demo tests/functional/charms
+  rm -rf tests/functional/charms/httpbin-demo/spread
+  cp -r operator/examples/k8s-2-configurable tests/functional/charms
+  rm -rf operator
