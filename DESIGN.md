@@ -2,20 +2,44 @@
 
 `jjx` exists for one job: run integration tests for a small Kubernetes charm from local source with real `ops` and real Pebble, without a Juju controller.
 
-The UX target is minimal:
+## the `jjx` command
 
-`uv run --group integration --with jjx pytest -v tests/integration`
+The primary interface is the `jjx` command, run from the charm project directory:
 
-Before running the integration tests, create a dummy charm artifact in the charm project
-directory, for example:
+```
+jjx          # run tests, then wait (Ctrl-C to tear down)
+jjx -d       # run tests, then detach (container stays up; use 'jjx down' to tear down)
+jjx down     # tear down all models and remove runtime state
+```
 
-`touch placeholder.charm`
+Optional flags:
 
-The test fixture only needs a `.charm` file to exist; `jjx` treats it as a deploy
-trigger and does not unpack it.
+- `-p HOST:CONTAINER` — publish a container port to `127.0.0.1:HOST`
 
-No project dependency changes. No `jjx` configuration.
-This command injects only `jjx`; it assumes the project already provides its normal test dependencies.
+`jjx` handles the full lifecycle: preflight cleanup of any stale state, creating and removing the placeholder charm artifact, invoking pytest, and tearing down on exit.
+
+## customization
+
+Pytest arguments can be overridden in the charm project's `pyproject.toml`:
+
+```toml
+[tool.jjx]
+pytest-args = ["-v", "tests/integration", "--no-juju-teardown"]
+```
+
+If `pytest-args` is not set, `jjx` defaults to `["tests/integration", "--no-juju-teardown"]`.
+
+## under the hood
+
+`jjx` invokes pytest via:
+
+```
+uv run --group integration [--with jjx | --python <venv>] pytest <pytest-args>
+```
+
+The test fixture only needs a `.charm` file to exist; `jjx` creates one automatically before running pytest and removes it afterwards. `jjx` treats it as a deploy trigger and does not unpack it.
+
+No project dependency changes are required. `jjx` injects itself and assumes the project already provides its normal test dependencies.
 
 ## scope
 
