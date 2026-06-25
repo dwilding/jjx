@@ -84,6 +84,9 @@ def _project_root() -> Path:
 
 
 def _jjx_dir() -> Path:
+    env_dir = os.environ.get("JJX_STATE_DIR")
+    if env_dir:
+        return Path(env_dir).resolve()
     return _project_root() / STATE_DIR_NAME
 
 
@@ -594,8 +597,6 @@ def _build_charm_env(
     workload_name: str | None = None,
 ) -> dict[str, str]:
     unit_name = app_state.get("unit", f"{app_name}/0")
-    runtime = app_state.get("runtime") or {}
-    charm_root = runtime.get("charm_dir", app_state["charm_source"])
 
     env = os.environ.copy()
     env.update(
@@ -606,7 +607,12 @@ def _build_charm_env(
             "JUJU_MODEL_UUID": model_state["uuid"],
             "JUJU_UNIT_NAME": unit_name,
             "JUJU_VERSION": "3.6.0",
-            "JUJU_CHARM_DIR": charm_root,
+            # Inside bubblewrap, the charm directory is bind-mounted at /charm,
+            # matching the path real Juju uses for JUJU_CHARM_DIR.
+            "JUJU_CHARM_DIR": "/charm",
+            # Hook tools run inside bubblewrap where cwd is /charm; they need
+            # to find .jjx/state.json, so pass the state directory explicitly.
+            "JJX_STATE_DIR": str(_jjx_dir()),
         }
     )
 
@@ -659,20 +665,20 @@ def _bwrap_cmd(charm_root: Path, workload_name: str) -> list[str]:
         "/dev",
         "--proc",
         "/proc",
-        "--dir",
+        # Bind the staged charm directory to /charm so that JUJU_CHARM_DIR=/charm
+        # matches real Juju, and charms that hardcode /charm paths work correctly.
+        "--bind",
+        str(charm_root),
         "/charm",
         "--dir",
         "/charm/containers",
         "--dir",
         f"/charm/containers/{workload_name}",
         "--bind",
-        str(charm_root),
-        str(charm_root),
-        "--bind",
         str(_socket_path()),
         pebble_socket,
         "--chdir",
-        str(charm_root),
+        "/charm",
         "--",
     ]
 
@@ -700,6 +706,9 @@ def _run_charm_event(
     charm_entrypoint = charm_root / "src" / "charm.py"
     if not charm_entrypoint.exists():
         raise CliError(f"charm entrypoint not found: {charm_entrypoint}")
+    # Inside bubblewrap, charm_root is bind-mounted at /charm, so the
+    # entrypoint path the charm Python receives must use the sandbox path.
+    charm_entry = "/charm/src/charm.py"
 
     _wait_for_socket(_socket_path())
 
@@ -744,7 +753,7 @@ def _run_charm_event(
         else str(sitecustomize_parent)
     )
 
-    cmd = _bwrap_cmd(charm_root, workload) + [charm_python, str(charm_entrypoint)]
+    cmd = _bwrap_cmd(charm_root, workload) + [charm_python, charm_entry]
     proc = subprocess.run(cmd, capture_output=True, text=True, env=env)
 
     state = _load_state()
