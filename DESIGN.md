@@ -88,13 +88,24 @@ Notes on generated runtime files:
 - Pebble runtime files are created inside the workload container under Pebble's default state path: `/var/lib/pebble/default`.
 - `./.jjx/socket` is a host-side bind target for the Pebble API socket, used to bridge the containerized Pebble daemon to host-side hook execution.
 - `JJX_CONTAINER_IP` is injected into the hook process environment from Docker inspect output for the workload container.
+- `JJX_STATE_DIR` is injected into the hook process environment pointing at the `.jjx/` directory. Inside `bubblewrap`, the charm's cwd is `/charm`, so hook tools (which call back into `jjx` to read and write state) cannot discover `.jjx/` by walking up from cwd. This env var lets them locate state directly.
 - `./.jjx/sitecustomize.py` rewrites outbound Python socket connects from `0.0.0.0:<port>` to the workload container bridge IP with the same port.
-- `./.jjx/charm/.unit-state.db` is created by charm runtime state persistence.
+- `./.jjx/charm/.unit-state.db` is created by charm runtime state persistence (written by `ops` via `sqlite3` to `JUJU_CHARM_DIR/.unit-state.db`, which inside `bubblewrap` is `/charm/.unit-state.db`).
 
 When the model is torn down, jjx removes the entire `./.jjx/` directory. The `~/.cache/jjx/pebble-bin` cache is kept for reuse across subsequent deployments.
 
 The socket path is intentionally short to reduce Unix socket path-length risk.
 Very long working-directory paths can still exceed platform limits.
+
+### bubblewrap and the `/charm` filesystem
+
+`bubblewrap` serves two purposes: filesystem isolation and filesystem fidelity.
+
+For **fidelity**, `bubblewrap` bind-mounts the staged charm directory (`./.jjx/charm/`) to `/charm` inside the sandbox. This matches real Juju, where the charm directory *is* `/charm` and `JUJU_CHARM_DIR=/charm`. Charms that hardcode `/charm` paths for file I/O (not just the Pebble socket) work correctly because `/charm` is a real directory they can read and write. `JUJU_CHARM_DIR` is set to `/charm`, so `ops` writes `.unit-state.db` to `/charm/.unit-state.db` — the same path real Juju uses.
+
+For **isolation**, `bubblewrap` gives the charm process a restricted filesystem view: a tmpfs root with read-only system directories (`/usr`, `/bin`, `/lib`, `/lib64`, `/etc`, `/home`) and write access only to `/charm`, the project root, and `/tmp`. This prevents accidental host-side writes and hides host-specific paths that could reduce test reproducibility across machines.
+
+`sitecustomize.py` handles a complementary concern that `bubblewrap` cannot: network path fidelity. It rewrites outbound TCP connects from `0.0.0.0:<port>` to the workload container bridge IP, so charm code that binds to `0.0.0.0` reaches the container without exposing ports on the host. `bubblewrap` is a filesystem sandbox, not a network proxy, so these two mechanisms are orthogonal and both necessary.
 
 ## execution contract
 
@@ -105,7 +116,7 @@ Exact sequence:
 3. `pytest` (via `jubilant`) invokes `juju ...` commands
 4. those commands execute `jjx` in that same `uv` environment
 5. for hook events, `jjx` launches `bubblewrap`
-6. inside `bubblewrap`, `jjx` runs `src/charm.py` using `sys.executable`
+6. inside `bubblewrap`, `jjx` runs `/charm/src/charm.py` using `sys.executable`
 7. `sys.executable` comes from the outer `uv` environment (no nested `uv run` per hook)
 8. hook tools execute `jjx` subcommands via that same `sys.executable`
 9. charm code interacts with hook tools and Pebble, then exits; `jjx` persists resulting state
@@ -160,7 +171,7 @@ State isolation rule:
 
 These constraints are deliberate. They keep the system small, predictable, and fast to debug.
 
-`bubblewrap` decision note: we considered dropping hook-process isolation because charm code is typically trusted in local development. We are keeping `bubblewrap` for now to reduce accidental host-side effects and improve test reproducibility across machines. This remains a conscious tradeoff, not a permanent rule; we can revisit if operational simplicity becomes more valuable than the isolation benefits.
+`bubblewrap` decision note: we considered dropping hook-process isolation because charm code is typically trusted in local development. We are keeping `bubblewrap` because it provides both filesystem fidelity (the charm sees `/charm` as a real directory matching real Juju, so charms that hardcode `/charm` paths work correctly) and filesystem isolation (preventing accidental host-side writes and hiding host-specific paths that could reduce test reproducibility across machines). The fidelity benefit cannot be replicated by Python-level interception alone, because `ops` writes state via `sqlite3` (a C module that bypasses Python file APIs) and charms may interact with the `/charm` filesystem directly. This remains a conscious tradeoff, not a permanent rule; we can revisit if operational simplicity becomes more valuable than the fidelity and isolation benefits.
 
 ## design intent
 
