@@ -1,0 +1,60 @@
+# This file configures Charmcraft.
+# See https://documentation.ubuntu.com/charmcraft/stable/reference/files/charmcraft-yaml-file/
+type: charm
+name: fastapi-demo
+title: Web Server Demo
+summary: A demo charm that operates a small Python FastAPI server.
+description: |
+  This charm demonstrates how to write a Kubernetes charm with Ops.
+
+# Documentation:
+# https://documentation.ubuntu.com/charmcraft/stable/howto/build-guides/select-platforms/
+base: ubuntu@24.04
+platforms:
+  amd64:
+  arm64:
+
+assumes:
+  - juju >= 3.6
+  - k8s-api
+
+parts:
+  charm:
+    plugin: uv
+    source: .
+    build-snaps:
+      - astral-uv
+
+# (Optional) Configuration options for the charm
+# This config section defines charm config options, and populates the Configure
+# tab on Charmhub.
+# More information on this section at:
+# https://documentation.ubuntu.com/charmcraft/stable/reference/files/charmcraft-yaml-file/#config
+# General configuration documentation:
+# https://documentation.ubuntu.com/juju/3.6/reference/configuration/#application-configuration
+config:
+  options:
+    # An example config option to customise the log level of the workload
+    log-level:
+      description: |
+        Configures the log level of gunicorn.
+
+        Acceptable values are: "info", "debug", "warning", "error" and "critical"
+      default: "info"
+      type: string
+
+containers:
+  demo-server:
+    resource: demo-server-image
+
+resources:
+  # An OCI image resource for the container listed above.
+  demo-server-image:
+    type: oci-image
+    description: OCI image from GitHub Container Repository
+    # The upstream-source field is ignored by Charmcraft and Juju, but it can be
+    # useful to developers in identifying the source of the OCI image.  It is also
+    # used by the 'canonical/charming-actions' GitHub action for automated releases.
+    # The test_deploy function in tests/integration/test_charm.py reads upstream-source
+    # to determine which OCI image to use when running the charm's integration tests.
+    upstream-source: ghcr.io/canonical/api_demo_server:1.0.4
