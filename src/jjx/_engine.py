@@ -795,6 +795,19 @@ def _status_for_app(app_name: str, app_state: dict[str, Any]) -> dict[str, Any]:
     current = app_stat.get("status", "unknown")
     message = app_stat.get("message", "")
 
+    # Resolve the workload container's IP address so callers (and Jubilant's
+    # ``UnitStatus.address`` / ``UnitStatus.public_address``) can reach the
+    # workload directly, mirroring ``juju status --format=json`` on K8s.
+    unit_address = ""
+    container_name = app_state.get("container_name", "")
+    if isinstance(container_name, str) and container_name:
+        try:
+            unit_address = _docker_container_ip(container_name)
+        except CliError:
+            # The container may not be running yet; leave the address empty
+            # rather than failing the status call entirely.
+            unit_address = ""
+
     return {
         "charm": app_state.get("charm", "local:jjx"),
         "charm-origin": "local",
@@ -817,6 +830,8 @@ def _status_for_app(app_name: str, app_state: dict[str, Any]) -> dict[str, Any]:
                     "message": "ready",
                 },
                 "leader": True,
+                "address": unit_address,
+                "public-address": unit_address,
             }
         },
     }
