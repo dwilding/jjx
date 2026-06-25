@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-cd tests/functional/charms/k8s-2-configurable-call-server/tests/integration
+cd tests/functional/charms/k8s-1-minimal-patched/tests/integration
 
 # Replace the 'import logging' line.
 sed -i 's/^import logging$/import json\nimport logging\nimport urllib.request/' test_charm.py
