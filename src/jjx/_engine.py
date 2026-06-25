@@ -35,8 +35,9 @@ SITECUSTOMIZE_FILE_NAME = "sitecustomize.py"
 PEBBLE_RELEASES_API = "https://api.github.com/repos/canonical/pebble/releases/latest"
 PEBBLE_RELEASES_DOWNLOAD = "https://github.com/canonical/pebble/releases/download/{tag}/{asset}"
 
-# Injected into the charm's Python environment to rewrite connect(0.0.0.0, port)
-# to connect(container_ip, port), mirroring the K8s pod shared-network-namespace model.
+# Injected into the charm's Python environment to rewrite connect(127.0.0.1, port)
+# to connect(container_ip, port), mirroring the K8s pod shared-network-namespace
+# model where loopback addresses reach the workload container.
 _SITECUSTOMIZE_PY = """\
 import os as _os
 import socket as _socket
@@ -46,7 +47,7 @@ if _container_ip:
     _orig_connect = _socket.socket.connect
 
     def _patched_connect(self, address):
-        if isinstance(address, tuple) and address[0] in ("0.0.0.0", "::"):
+        if isinstance(address, tuple) and address[0] in ("127.0.0.1", "localhost", "::1"):
             address = (_container_ip, *address[1:])
         return _orig_connect(self, address)
 

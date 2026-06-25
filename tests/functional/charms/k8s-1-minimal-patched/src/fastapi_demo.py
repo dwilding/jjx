@@ -37,7 +37,7 @@ def get_version(port: int) -> str:
         RuntimeError: If the server can't be reached, for example because of an invalid port.
     """
     try:
-        response = urllib.request.urlopen(f"http://0.0.0.0:{port}/version")
+        response = urllib.request.urlopen(f"http://localhost:{port}/version")
     except urllib.error.URLError as e:
         raise RuntimeError(f"Could not connect to the workload server on port {port}") from e
     data = json.loads(response.read())
