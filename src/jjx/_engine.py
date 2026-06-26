@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tarfile
 import time
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -151,6 +152,128 @@ def _cleanup_model_artifacts() -> None:
 def _append_log(model_state: dict[str, Any], message: str) -> None:
     logs = model_state.setdefault("logs", [])
     logs.append(f"{_now_iso()} {message}")
+
+
+# ---------------------------------------------------------------------------
+# Relation state helpers
+#
+# Relations are stored in model_state["relations"] as a list of dicts:
+#   {
+#     "id": 0,
+#     "interface": "postgresql_client",
+#     "endpoints": {"fastapi-demo": "database", "postgresql-k8s": "database"},
+#     "data": {
+#       "fastapi-demo": {"app": {...}, "fastapi-demo/0": {...}},
+#       "postgresql-k8s": {"app": {...}, "postgresql-k8s/0": {...}},
+#     },
+#   }
+# ---------------------------------------------------------------------------
+
+
+def _relations(model_state: dict[str, Any]) -> list[dict[str, Any]]:
+    return model_state.setdefault("relations", [])
+
+
+def _find_relation_by_id(model_state: dict[str, Any], relation_id: int) -> dict[str, Any] | None:
+    for rel in _relations(model_state):
+        if rel.get("id") == relation_id:
+            return rel
+    return None
+
+
+def _find_relations_for_endpoint(
+    model_state: dict[str, Any], app_name: str, endpoint_name: str
+) -> list[dict[str, Any]]:
+    result = []
+    for rel in _relations(model_state):
+        endpoints = rel.get("endpoints", {})
+        if endpoints.get(app_name) == endpoint_name:
+            result.append(rel)
+    return result
+
+
+def _next_relation_id(model_state: dict[str, Any]) -> int:
+    relations = _relations(model_state)
+    if not relations:
+        return 0
+    return max(rel.get("id", -1) for rel in relations) + 1
+
+
+def _relation_data_bucket(
+    relation: dict[str, Any], app_name: str, unit_name: str | None = None
+) -> dict[str, str]:
+    """Get the databag for an app or unit within a relation.
+
+    If unit_name is None, returns the app databag; otherwise the unit databag.
+    """
+    data = relation.setdefault("data", {})
+    app_data = data.setdefault(app_name, {})
+    if unit_name is None:
+        return app_data.setdefault("app", {})
+    return app_data.setdefault(unit_name, {})
+
+
+def _relation_remote_app(relation: dict[str, Any], local_app: str) -> str | None:
+    """Return the remote app name for a relation, given the local app."""
+    endpoints = relation.get("endpoints", {})
+    for app_name in endpoints:
+        if app_name != local_app:
+            return app_name
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Secret state helpers
+#
+# Secrets are stored in model_state["secrets"] as a list of dicts:
+#   {
+#     "id": "secret://<uuid>/<id>",
+#     "label": "...",
+#     "owner": "postgresql-k8s",
+#     "content": {"username": "...", "password": "..."},
+#     "revision": 1,
+#     "grants": [{"relation_id": 0, "app": "fastapi-demo"}],
+#   }
+# ---------------------------------------------------------------------------
+
+
+def _secrets(model_state: dict[str, Any]) -> list[dict[str, Any]]:
+    return model_state.setdefault("secrets", [])
+
+
+def _next_secret_id(model_state: dict[str, Any]) -> str:
+    """Generate a new secret ID in the canonical URI form."""
+    model_uuid = model_state.get("uuid", "00000000-0000-0000-0000-000000000000")
+    raw_id = uuid.uuid4().hex
+    return f"secret://{model_uuid}/{raw_id}"
+
+
+def _find_secret_by_id(model_state: dict[str, Any], secret_id: str) -> dict[str, Any] | None:
+    # Normalize: accept "secret://uuid/id", "secret:id", or bare "id"
+    normalized = _canonical_secret_id(secret_id, model_state.get("uuid", ""))
+    for secret in _secrets(model_state):
+        if secret.get("id") == normalized:
+            return secret
+    return None
+
+
+def _find_secret_by_label(model_state: dict[str, Any], label: str) -> dict[str, Any] | None:
+    for secret in _secrets(model_state):
+        if secret.get("label") == label:
+            return secret
+    return None
+
+
+def _canonical_secret_id(secret_id: str, model_uuid: str) -> str:
+    """Normalize a secret ID to the canonical secret://<uuid>/<id> form."""
+    secret_id = secret_id.strip()
+    if secret_id.startswith("secret://"):
+        return secret_id
+    if secret_id.startswith("secret:"):
+        bare = secret_id[len("secret:") :]
+        return f"secret://{model_uuid}/{bare}" if model_uuid else f"secret:{bare}"
+    # Bare ID
+    return f"secret://{model_uuid}/{secret_id}" if model_uuid else f"secret:{secret_id}"
 
 
 def _require_model_name(state: dict[str, Any], model: str | None) -> str:
@@ -525,6 +648,19 @@ def _ensure_hook_tools(python_exe: str) -> None:
         "status-set",
         "is-leader",
         "juju-log",
+        "relation-ids",
+        "relation-list",
+        "relation-get",
+        "relation-set",
+        "relation-model-get",
+        "secret-add",
+        "secret-get",
+        "secret-grant",
+        "secret-info-get",
+        "secret-ids",
+        "secret-remove",
+        "secret-revoke",
+        "secret-set",
     ]
     root = _hook_tools_dir()
     root.mkdir(parents=True, exist_ok=True)
@@ -553,6 +689,17 @@ def _stage_runtime_charm(charm_source: Path, runtime_charm_dir: Path) -> None:
             src_link.unlink()
     src_link.symlink_to(charm_source / "src", target_is_directory=True)
 
+    # Stage the lib/ directory (charm libraries) if it exists.
+    lib_source = charm_source / "lib"
+    if lib_source.is_dir():
+        lib_link = runtime_charm_dir / "lib"
+        if lib_link.exists() or lib_link.is_symlink():
+            if lib_link.is_dir() and not lib_link.is_symlink():
+                shutil.rmtree(lib_link)
+            else:
+                lib_link.unlink()
+        lib_link.symlink_to(lib_source, target_is_directory=True)
+
     data = _read_yaml(charm_source / "charmcraft.yaml")
 
     metadata: dict[str, Any] = {}
@@ -578,6 +725,13 @@ def _stage_runtime_charm(charm_source: Path, runtime_charm_dir: Path) -> None:
         yaml.safe_dump(data.get("config", {}), sort_keys=False),
         encoding="utf-8",
     )
+    # ops reads actions from a separate actions.yaml file.
+    actions = data.get("actions")
+    if actions:
+        (runtime_charm_dir / "actions.yaml").write_text(
+            yaml.safe_dump(actions, sort_keys=False),
+            encoding="utf-8",
+        )
 
 
 def _ensure_runtime_layout(app_state: dict[str, Any]) -> None:
@@ -595,6 +749,7 @@ def _build_charm_env(
     hook_name: str,
     dispatch_path: str,
     workload_name: str | None = None,
+    relation: dict[str, Any] | None = None,
 ) -> dict[str, str]:
     unit_name = app_state.get("unit", f"{app_name}/0")
 
@@ -620,6 +775,18 @@ def _build_charm_env(
         env["JUJU_WORKLOAD_NAME"] = workload_name
     else:
         env.pop("JUJU_WORKLOAD_NAME", None)
+
+    if relation is not None:
+        endpoint = relation.get("endpoints", {}).get(app_name, "")
+        remote_app = _relation_remote_app(relation, app_name)
+        env["JUJU_RELATION"] = endpoint
+        env["JUJU_RELATION_ID"] = f"{endpoint}:{relation['id']}"
+        if remote_app:
+            env["JUJU_REMOTE_APP"] = remote_app
+            env["JUJU_REMOTE_UNIT"] = f"{remote_app}/0"
+    else:
+        for var in ("JUJU_RELATION", "JUJU_RELATION_ID", "JUJU_REMOTE_APP", "JUJU_REMOTE_UNIT"):
+            env.pop(var, None)
 
     path_entries = [str(_hook_tools_dir())]
     project_venv_bin = _project_venv_bin()
@@ -689,6 +856,7 @@ def _run_charm_event(
     hook_name: str,
     dispatch_path: str,
     workload_name: str | None = None,
+    relation: dict[str, Any] | None = None,
 ) -> None:
     state = _load_state()
     model_state = state["models"][model_name]
@@ -723,9 +891,13 @@ def _run_charm_event(
         hook_name=hook_name,
         dispatch_path=dispatch_path,
         workload_name=workload,
+        relation=relation,
     )
 
     site_paths = [p for p in sys.path if "site-packages" in p and Path(p).exists()]
+    # Inside bubblewrap, the charm is at /charm, so charm libraries in /charm/lib
+    # must be on PYTHONPATH for imports like `from charms.data_platform_libs...`.
+    site_paths.append("/charm/lib")
     existing_pythonpath = env.get("PYTHONPATH", "")
     if existing_pythonpath:
         site_paths.append(existing_pythonpath)
@@ -784,6 +956,31 @@ def _run_deploy_event_flow(model_name: str, app_name: str, workload_name: str) -
 
 def _run_config_event_flow(model_name: str, app_name: str) -> None:
     _run_charm_event(model_name, app_name, "config-changed", "hooks/config-changed")
+
+
+def _run_relation_event_flow(
+    model_name: str,
+    app_name: str,
+    relation: dict[str, Any],
+    event: str = "changed",
+) -> None:
+    """Fire relation-created then relation-changed on the charm.
+
+    Args:
+        event: "created" or "changed".
+    """
+    endpoint = relation.get("endpoints", {}).get(app_name, "")
+    if not endpoint:
+        raise CliError(f"app {app_name} not in relation {relation.get('id')}")
+    hook_name = f"{endpoint}-relation-{event}"
+    dispatch_path = f"hooks/{endpoint}-relation-{event}"
+    _run_charm_event(
+        model_name,
+        app_name,
+        hook_name,
+        dispatch_path,
+        relation=relation,
+    )
 
 
 def _status_for_app(app_name: str, app_state: dict[str, Any]) -> dict[str, Any]:

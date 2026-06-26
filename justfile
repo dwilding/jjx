@@ -30,4 +30,8 @@ charms:
   cp -r operator/examples/httpbin-demo tests/functional/charms
   rm -rf tests/functional/charms/httpbin-demo/spread
   cp -r operator/examples/k8s-2-configurable tests/functional/charms
+  cp -r operator/examples/k8s-4-action tests/functional/charms
+  pushd tests/functional/charms/k8s-4-action
+  charmcraft fetch-libs
+  popd
   rm -rf operator
