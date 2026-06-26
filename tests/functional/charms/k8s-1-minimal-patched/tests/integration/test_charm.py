@@ -18,8 +18,10 @@
 # pytest-jubilant provides a module-scoped `juju` fixture that creates a temporary Juju model.
 # The `charm` fixture is defined in conftest.py.
 
+import json
 import logging
 import pathlib
+import urllib.request
 
 import jubilant
 import pytest
@@ -43,7 +45,10 @@ def test_deploy(charm: pathlib.Path, juju: jubilant.Juju):
 
 def test_workload_version_is_set(juju: jubilant.Juju):
     # Verify that the workload version has been set.
-    version = juju.status().apps["fastapi-demo"].version
+    unit_ip = juju.status().apps[APP_NAME].units[f"{APP_NAME}/0"].address
+    response = urllib.request.urlopen(f"http://{unit_ip}:8000/version")
+    data = json.loads(response.read())
+    version = data["version"]
     # Ideally, the test should get the version directly from the workload application
     # (for example, through an API call) and use that in this assertion.
     # For simplicity, we hardcode the version here. We update the tutorial whenever we

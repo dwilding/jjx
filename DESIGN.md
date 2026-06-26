@@ -89,7 +89,7 @@ Notes on generated runtime files:
 - `./.jjx/socket` is a host-side bind target for the Pebble API socket, used to bridge the containerized Pebble daemon to host-side hook execution.
 - `JJX_CONTAINER_IP` is injected into the hook process environment from Docker inspect output for the workload container.
 - `JJX_STATE_DIR` is injected into the hook process environment pointing at the `.jjx/` directory. Inside `bubblewrap`, the charm's cwd is `/charm`, so hook tools (which call back into `jjx` to read and write state) cannot discover `.jjx/` by walking up from cwd. This env var lets them locate state directly.
-- `./.jjx/sitecustomize.py` rewrites outbound Python socket connects from `0.0.0.0:<port>` to the workload container bridge IP with the same port.
+- `./.jjx/sitecustomize.py` rewrites outbound Python socket connects from loopback addresses (`127.0.0.1`, `localhost`, `::1`) to the workload container bridge IP with the same port.
 - `./.jjx/charm/.unit-state.db` is created by charm runtime state persistence (written by `ops` via `sqlite3` to `JUJU_CHARM_DIR/.unit-state.db`, which inside `bubblewrap` is `/charm/.unit-state.db`).
 
 When the model is torn down, jjx removes the entire `./.jjx/` directory. The `~/.cache/jjx/pebble-bin` cache is kept for reuse across subsequent deployments.
@@ -154,7 +154,7 @@ Destroy flow:
 - hook tools invoked as subprocess executables
 - synchronous event execution (no queue, no background agent)
 - deterministic single-unit semantics
-- charm code that connects to `0.0.0.0:<port>` reaches the workload container without exposing container ports on the host
+- charm code that connects to loopback addresses (`127.0.0.1`, `localhost`, `::1`) reaches the workload container without exposing container ports on the host
 
 ## constraints
 
