@@ -20,6 +20,7 @@ from . import (
     _cmd_debug_log,
     _cmd_deploy,
     _cmd_destroy_model,
+    _cmd_integrate,
     _cmd_remove_application,
     _cmd_hook_tool,
     _cmd_status,
@@ -54,6 +55,8 @@ def run_juju_command(argv: list[str]) -> int:
         return _cmd_add_model.add_model(rest)
     if command == "deploy":
         return _cmd_deploy.deploy(rest, model)
+    if command == "integrate":
+        return _cmd_integrate.integrate(rest, model)
     if command == "remove-application":
         return _cmd_remove_application.remove_application(rest, model)
     if command == "config":

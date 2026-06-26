@@ -58,3 +58,10 @@ def k8s_2_configurable(temp_dir):
     charm_dir = temp_dir / "k8s-2-configurable"
     prepare_charm_dir(CHARMS_DIR / "k8s-2-configurable", charm_dir)
     return charm_dir
+
+
+@pytest.fixture(scope="module")
+def k8s_4_action(temp_dir):
+    charm_dir = temp_dir / "k8s-4-action"
+    prepare_charm_dir(CHARMS_DIR / "k8s-4-action", charm_dir)
+    return charm_dir
