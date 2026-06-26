@@ -33,3 +33,7 @@ charms:
   .scripts/patch-k8s-1-minimal.sh
   cp -r operator/examples/k8s-2-configurable tests/functional/charms
   rm -rf operator
+
+[private]
+clean-docker:
+  docker ps --all --quiet | xargs --no-run-if-empty docker rm --force
