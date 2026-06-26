@@ -53,6 +53,7 @@ def hook_tool(args: list[str]) -> int:
     tool = args[0]
     tool_args = args[1:]
     state, _model_name, app_name, model_state, app_state = _tool_context()
+    unit_name = os.environ.get("JUJU_UNIT_NAME", f"{app_name}/0")
 
     if tool == "config-get":
         output_format = "json"
@@ -195,4 +196,668 @@ def hook_tool(args: list[str]) -> int:
         _engine._save_state(state)
         return 0
 
+    if tool == "relation-ids":
+        return _relation_ids(tool_args, model_state)
+
+    if tool == "relation-list":
+        return _relation_list(tool_args, model_state, app_name)
+
+    if tool == "relation-get":
+        return _relation_get(tool_args, model_state, app_name, unit_name)
+
+    if tool == "relation-set":
+        return _relation_set(tool_args, model_state, app_name, unit_name, state)
+
+    if tool == "relation-model-get":
+        return _relation_model_get(tool_args, model_state)
+
+    if tool == "secret-add":
+        return _secret_add(tool_args, model_state, app_name, state)
+
+    if tool == "secret-get":
+        return _secret_get(tool_args, model_state)
+
+    if tool == "secret-grant":
+        return _secret_grant(tool_args, model_state, state)
+
+    if tool == "secret-info-get":
+        return _secret_info_get(tool_args, model_state)
+
+    if tool == "secret-ids":
+        return _secret_ids(model_state, app_name)
+
+    if tool == "secret-remove":
+        return _secret_remove(tool_args, model_state, state)
+
+    if tool == "secret-revoke":
+        return _secret_revoke(tool_args, model_state, state)
+
+    if tool == "secret-set":
+        return _secret_set(tool_args, model_state, state)
+
     raise _engine.CliError(f"unsupported hook tool: {tool}")
+
+
+# ---------------------------------------------------------------------------
+# Relation hook tools
+# ---------------------------------------------------------------------------
+
+
+def _parse_relation_ref(token: str) -> tuple[str | None, int | None]:
+    """Parse a -r argument like 'database:0' or '0'.
+
+    Returns (endpoint, relation_id). Either may be None.
+    """
+    if ":" in token:
+        endpoint, _, id_str = token.rpartition(":")
+        try:
+            return endpoint or None, int(id_str)
+        except ValueError:
+            return token, None
+    try:
+        return None, int(token)
+    except ValueError:
+        return token, None
+
+
+def _resolve_relation_from_env(model_state: dict[str, Any]) -> dict[str, Any] | None:
+    """Resolve the current relation from JUJU_RELATION_ID env var."""
+    raw = os.environ.get("JUJU_RELATION_ID", "")
+    if not raw:
+        return None
+    _, relation_id = _parse_relation_ref(raw)
+    if relation_id is None:
+        return None
+    return _engine._find_relation_by_id(model_state, relation_id)
+
+
+def _output(payload: Any, output_format: str = "json") -> None:
+    if output_format == "yaml":
+        sys.stdout.write(yaml.safe_dump(payload, sort_keys=False))
+    else:
+        sys.stdout.write(json.dumps(payload))
+
+
+def _relation_ids(tool_args: list[str], model_state: dict[str, Any]) -> int:
+    """relation-ids <endpoint> [--format=json]"""
+    output_format = "json"
+    endpoint: str | None = None
+    i = 0
+    while i < len(tool_args):
+        token = tool_args[i]
+        if token == "--format" and i + 1 < len(tool_args):
+            output_format = tool_args[i + 1]
+            i += 2
+            continue
+        if token.startswith("--format="):
+            output_format = token.split("=", 1)[1]
+            i += 1
+            continue
+        if token.startswith("-"):
+            i += 1
+            continue
+        endpoint = token
+        i += 1
+
+    if endpoint is None:
+        raise _engine.CliError("relation-ids requires an endpoint name")
+
+    result = []
+    for rel in _engine._relations(model_state):
+        for app_name, ep in rel.get("endpoints", {}).items():
+            if ep == endpoint:
+                result.append(f"{endpoint}:{rel['id']}")
+                break
+
+    _output(result, output_format)
+    return 0
+
+
+def _relation_list(tool_args: list[str], model_state: dict[str, Any], local_app: str) -> int:
+    """relation-list [-r <ref>] [--app] [--format=json]"""
+    output_format = "json"
+    is_app = False
+    relation_id: int | None = None
+    i = 0
+    while i < len(tool_args):
+        token = tool_args[i]
+        if token == "--format" and i + 1 < len(tool_args):
+            output_format = tool_args[i + 1]
+            i += 2
+            continue
+        if token.startswith("--format="):
+            output_format = token.split("=", 1)[1]
+            i += 1
+            continue
+        if token == "-r" and i + 1 < len(tool_args):
+            _, relation_id = _parse_relation_ref(tool_args[i + 1])
+            i += 2
+            continue
+        if token.startswith("-r"):
+            _, relation_id = _parse_relation_ref(token[2:])
+            i += 1
+            continue
+        if token == "--app":
+            is_app = True
+            i += 1
+            continue
+        i += 1
+
+    if relation_id is None:
+        rel = _resolve_relation_from_env(model_state)
+    else:
+        rel = _engine._find_relation_by_id(model_state, relation_id)
+    if rel is None:
+        raise _engine.CliError("relation not found")
+
+    if is_app:
+        remote_app = _engine._relation_remote_app(rel, local_app)
+        _output(remote_app if remote_app else "", output_format)
+    else:
+        # List remote units. In jjx's single-unit model, the remote app has one unit.
+        remote_app = _engine._relation_remote_app(rel, local_app)
+        units = [f"{remote_app}/0"] if remote_app else []
+        _output(units, output_format)
+    return 0
+
+
+def _relation_get(
+    tool_args: list[str],
+    model_state: dict[str, Any],
+    local_app: str,
+    local_unit: str,
+) -> int:
+    """relation-get [--format=json] [-r <ref>] [--app] [key] [unit]"""
+    output_format = "json"
+    is_app = False
+    relation_id: int | None = None
+    key: str | None = None
+    unit: str | None = None
+    i = 0
+    while i < len(tool_args):
+        token = tool_args[i]
+        if token == "--format" and i + 1 < len(tool_args):
+            output_format = tool_args[i + 1]
+            i += 2
+            continue
+        if token.startswith("--format="):
+            output_format = token.split("=", 1)[1]
+            i += 1
+            continue
+        if token == "-r" and i + 1 < len(tool_args):
+            _, relation_id = _parse_relation_ref(tool_args[i + 1])
+            i += 2
+            continue
+        if token.startswith("-r"):
+            _, relation_id = _parse_relation_ref(token[2:])
+            i += 1
+            continue
+        if token == "--app":
+            is_app = True
+            i += 1
+            continue
+        if token == "-":
+            # "-" means "all keys" in Juju relation-get
+            if key is None:
+                key = "-"
+            i += 1
+            continue
+        if token.startswith("-"):
+            i += 1
+            continue
+        # Positional args: key and unit (key first, then unit)
+        if key is None:
+            key = token
+        elif unit is None:
+            unit = token
+        i += 1
+
+    if relation_id is None:
+        rel = _resolve_relation_from_env(model_state)
+    else:
+        rel = _engine._find_relation_by_id(model_state, relation_id)
+    if rel is None:
+        raise _engine.CliError("relation not found")
+
+    # Determine which app's databag to read.
+    # If a unit is specified, it belongs to some app; use that app.
+    # Otherwise, default to the local app's databag.
+    if unit:
+        target_app = unit.split("/")[0] if "/" in unit else unit
+        target_unit = unit
+    else:
+        target_app = local_app
+        target_unit = local_unit
+
+    if is_app:
+        bucket = _engine._relation_data_bucket(rel, target_app, None)
+    else:
+        bucket = _engine._relation_data_bucket(rel, target_app, target_unit)
+
+    if key and key != "-":
+        _output(bucket.get(key, ""), output_format)
+    else:
+        _output(dict(bucket), output_format)
+    return 0
+
+
+def _relation_set(
+    tool_args: list[str],
+    model_state: dict[str, Any],
+    local_app: str,
+    local_unit: str,
+    state: dict[str, Any],
+) -> int:
+    """relation-set [-r <ref>] [--app] [--file -] (stdin JSON)"""
+    is_app = False
+    relation_id: int | None = None
+    content = ""
+    i = 0
+    while i < len(tool_args):
+        token = tool_args[i]
+        if token == "-r" and i + 1 < len(tool_args):
+            _, relation_id = _parse_relation_ref(tool_args[i + 1])
+            i += 2
+            continue
+        if token.startswith("-r"):
+            _, relation_id = _parse_relation_ref(token[2:])
+            i += 1
+            continue
+        if token == "--app":
+            is_app = True
+            i += 1
+            continue
+        if token == "--file" and i + 1 < len(tool_args):
+            # ops always uses --file - (stdin). Read the JSON from stdin.
+            content = sys.stdin.read()
+            i += 2
+            continue
+        if token.startswith("--file="):
+            file_path = token.split("=", 1)[1]
+            content = open(file_path).read()  # noqa: SIM115
+            i += 1
+            continue
+        i += 1
+
+    if relation_id is None:
+        rel = _resolve_relation_from_env(model_state)
+    else:
+        rel = _engine._find_relation_by_id(model_state, relation_id)
+    if rel is None:
+        raise _engine.CliError("relation not found")
+
+    try:
+        data = json.loads(content) if content.strip() else {}
+    except json.JSONDecodeError as exc:
+        raise _engine.CliError(f"invalid relation-set JSON: {exc}") from None
+
+    if is_app:
+        bucket = _engine._relation_data_bucket(rel, local_app, None)
+    else:
+        bucket = _engine._relation_data_bucket(rel, local_app, local_unit)
+
+    for k, v in data.items():
+        if v == "":
+            bucket.pop(k, None)
+        else:
+            bucket[k] = v
+
+    _engine._save_state(state)
+    return 0
+
+
+def _relation_model_get(tool_args: list[str], model_state: dict[str, Any]) -> int:
+    """relation-model-get [-r <ref>] [--format=json]"""
+    output_format = "json"
+    relation_id: int | None = None
+    i = 0
+    while i < len(tool_args):
+        token = tool_args[i]
+        if token == "--format" and i + 1 < len(tool_args):
+            output_format = tool_args[i + 1]
+            i += 2
+            continue
+        if token.startswith("--format="):
+            output_format = token.split("=", 1)[1]
+            i += 1
+            continue
+        if token == "-r" and i + 1 < len(tool_args):
+            _, relation_id = _parse_relation_ref(tool_args[i + 1])
+            i += 2
+            continue
+        if token.startswith("-r"):
+            _, relation_id = _parse_relation_ref(token[2:])
+            i += 1
+            continue
+        i += 1
+
+    if relation_id is None:
+        rel = _resolve_relation_from_env(model_state)
+    else:
+        rel = _engine._find_relation_by_id(model_state, relation_id)
+    if rel is None:
+        raise _engine.CliError("relation not found")
+
+    _output({"uuid": model_state.get("uuid", "")}, output_format)
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Secret hook tools
+# ---------------------------------------------------------------------------
+
+
+def _secret_add(
+    tool_args: list[str],
+    model_state: dict[str, Any],
+    app_name: str,
+    state: dict[str, Any],
+) -> int:
+    """secret-add [--label <l>] [--owner application] <key>#file=<path> ..."""
+    label: str | None = None
+    content: dict[str, str] = {}
+    i = 0
+    while i < len(tool_args):
+        token = tool_args[i]
+        if token == "--label" and i + 1 < len(tool_args):
+            label = tool_args[i + 1]
+            i += 2
+            continue
+        if token.startswith("--label="):
+            label = token.split("=", 1)[1]
+            i += 1
+            continue
+        if token == "--owner" and i + 1 < len(tool_args):
+            # Owner is always the application in jjx; consume and ignore.
+            i += 2
+            continue
+        if token.startswith("--owner="):
+            i += 1
+            continue
+        if token.startswith("-"):
+            i += 1
+            continue
+        # key#file=path format
+        if "#file=" in token:
+            key, _, file_path = token.partition("#file=")
+            try:
+                content[key] = open(file_path).read()  # noqa: SIM115
+            except OSError as exc:
+                raise _engine.CliError(f"failed to read secret file {file_path}: {exc}") from None
+        i += 1
+
+    secret_id = _engine._next_secret_id(model_state)
+    secret = {
+        "id": secret_id,
+        "label": label,
+        "owner": app_name,
+        "content": content,
+        "revision": 1,
+        "grants": [],
+    }
+    _engine._secrets(model_state).append(secret)
+    _engine._save_state(state)
+    # secret-add prints the secret ID (the URI form) on stdout
+    sys.stdout.write(f"{secret_id}\n")
+    return 0
+
+
+def _secret_get(tool_args: list[str], model_state: dict[str, Any]) -> int:
+    """secret-get [--format=json] <id> [--label <l>] [--refresh|--peek]"""
+    output_format = "json"
+    secret_id: str | None = None
+    label: str | None = None
+    i = 0
+    while i < len(tool_args):
+        token = tool_args[i]
+        if token == "--format" and i + 1 < len(tool_args):
+            output_format = tool_args[i + 1]
+            i += 2
+            continue
+        if token.startswith("--format="):
+            output_format = token.split("=", 1)[1]
+            i += 1
+            continue
+        if token == "--label" and i + 1 < len(tool_args):
+            label = tool_args[i + 1]
+            i += 2
+            continue
+        if token.startswith("--label="):
+            label = token.split("=", 1)[1]
+            i += 1
+            continue
+        if token in ("--refresh", "--peek"):
+            i += 1
+            continue
+        if token.startswith("-"):
+            i += 1
+            continue
+        if secret_id is None:
+            secret_id = token
+        i += 1
+
+    secret = None
+    if secret_id:
+        secret = _engine._find_secret_by_id(model_state, secret_id)
+    if secret is None and label:
+        secret = _engine._find_secret_by_label(model_state, label)
+    if secret is None:
+        raise _engine.CliError(f"secret not found: {secret_id or label}")
+
+    _output(dict(secret.get("content", {})), output_format)
+    return 0
+
+
+def _secret_grant(tool_args: list[str], model_state: dict[str, Any], state: dict[str, Any]) -> int:
+    """secret-grant --relation <rid> [--unit <unit>] <id>"""
+    relation_id: int | None = None
+    unit: str | None = None
+    secret_id: str | None = None
+    i = 0
+    while i < len(tool_args):
+        token = tool_args[i]
+        if token == "--relation" and i + 1 < len(tool_args):
+            relation_id = int(tool_args[i + 1])
+            i += 2
+            continue
+        if token.startswith("--relation="):
+            relation_id = int(token.split("=", 1)[1])
+            i += 1
+            continue
+        if token == "--unit" and i + 1 < len(tool_args):
+            unit = tool_args[i + 1]
+            i += 2
+            continue
+        if token.startswith("--unit="):
+            unit = token.split("=", 1)[1]
+            i += 1
+            continue
+        if token.startswith("-"):
+            i += 1
+            continue
+        if secret_id is None:
+            secret_id = token
+        i += 1
+
+    if secret_id is None:
+        raise _engine.CliError("secret-grant requires a secret ID")
+    secret = _engine._find_secret_by_id(model_state, secret_id)
+    if secret is None:
+        raise _engine.CliError(f"secret not found: {secret_id}")
+
+    grants = secret.setdefault("grants", [])
+    grant_entry = {"relation_id": relation_id, "unit": unit}
+    if grant_entry not in grants:
+        grants.append(grant_entry)
+    _engine._save_state(state)
+    return 0
+
+
+def _secret_info_get(tool_args: list[str], model_state: dict[str, Any]) -> int:
+    """secret-info-get [--format=json] <id> | --label <l>"""
+    output_format = "json"
+    secret_id: str | None = None
+    label: str | None = None
+    i = 0
+    while i < len(tool_args):
+        token = tool_args[i]
+        if token == "--format" and i + 1 < len(tool_args):
+            output_format = tool_args[i + 1]
+            i += 2
+            continue
+        if token.startswith("--format="):
+            output_format = token.split("=", 1)[1]
+            i += 1
+            continue
+        if token == "--label" and i + 1 < len(tool_args):
+            label = tool_args[i + 1]
+            i += 2
+            continue
+        if token.startswith("--label="):
+            label = token.split("=", 1)[1]
+            i += 1
+            continue
+        if token.startswith("-"):
+            i += 1
+            continue
+        if secret_id is None:
+            secret_id = token
+        i += 1
+
+    secret = None
+    if secret_id:
+        secret = _engine._find_secret_by_id(model_state, secret_id)
+    if secret is None and label:
+        secret = _engine._find_secret_by_label(model_state, label)
+    if secret is None:
+        raise _engine.CliError(f"secret not found: {secret_id or label}")
+
+    info = {
+        "revision": secret.get("revision", 1),
+        "label": secret.get("label"),
+        "owner": secret.get("owner"),
+        "expires": None,
+        "rotation": None,
+        "rotates": None,
+        "description": None,
+    }
+    _output(info, output_format)
+    return 0
+
+
+def _secret_ids(model_state: dict[str, Any], app_name: str) -> int:
+    """secret-ids [--format=json]"""
+    result = []
+    for secret in _engine._secrets(model_state):
+        if secret.get("owner") == app_name:
+            result.append(secret["id"])
+    sys.stdout.write(json.dumps(result))
+    return 0
+
+
+def _secret_remove(
+    tool_args: list[str], model_state: dict[str, Any], state: dict[str, Any]
+) -> int:
+    """secret-remove <id> [--revision <n>]"""
+    secret_id: str | None = None
+    i = 0
+    while i < len(tool_args):
+        token = tool_args[i]
+        if token == "--revision" and i + 1 < len(tool_args):
+            i += 2
+            continue
+        if token.startswith("--revision="):
+            i += 1
+            continue
+        if token.startswith("-"):
+            i += 1
+            continue
+        if secret_id is None:
+            secret_id = token
+        i += 1
+
+    if secret_id is None:
+        raise _engine.CliError("secret-remove requires a secret ID")
+    secret = _engine._find_secret_by_id(model_state, secret_id)
+    if secret is not None:
+        _engine._secrets(model_state).remove(secret)
+        _engine._save_state(state)
+    return 0
+
+
+def _secret_revoke(
+    tool_args: list[str], model_state: dict[str, Any], state: dict[str, Any]
+) -> int:
+    """secret-revoke [--relation <rid>] [--app <app>] [--unit <unit>] <id>"""
+    relation_id: int | None = None
+    secret_id: str | None = None
+    i = 0
+    while i < len(tool_args):
+        token = tool_args[i]
+        if token == "--relation" and i + 1 < len(tool_args):
+            relation_id = int(tool_args[i + 1])
+            i += 2
+            continue
+        if token.startswith("--relation="):
+            relation_id = int(token.split("=", 1)[1])
+            i += 1
+            continue
+        if token.startswith("-"):
+            i += 1
+            continue
+        if secret_id is None:
+            secret_id = token
+        i += 1
+
+    if secret_id is None:
+        raise _engine.CliError("secret-revoke requires a secret ID")
+    secret = _engine._find_secret_by_id(model_state, secret_id)
+    if secret is not None:
+        grants = secret.get("grants", [])
+        secret["grants"] = [g for g in grants if g.get("relation_id") != relation_id]
+        _engine._save_state(state)
+    return 0
+
+
+def _secret_set(tool_args: list[str], model_state: dict[str, Any], state: dict[str, Any]) -> int:
+    """secret-set [--label <l>] <id> [key#file=<path> ...]"""
+    secret_id: str | None = None
+    content: dict[str, str] = {}
+    i = 0
+    while i < len(tool_args):
+        token = tool_args[i]
+        if token.startswith("--label="):
+            i += 1
+            continue
+        if token == "--label" and i + 1 < len(tool_args):
+            i += 2
+            continue
+        if token.startswith("--owner"):
+            if "=" in token:
+                i += 1
+            else:
+                i += 2
+            continue
+        if token.startswith("-"):
+            i += 1
+            continue
+        if secret_id is None:
+            secret_id = token
+        elif "#file=" in token:
+            key, _, file_path = token.partition("#file=")
+            try:
+                content[key] = open(file_path).read()  # noqa: SIM115
+            except OSError as exc:
+                raise _engine.CliError(f"failed to read secret file {file_path}: {exc}") from None
+        i += 1
+
+    if secret_id is None:
+        raise _engine.CliError("secret-set requires a secret ID")
+    secret = _engine._find_secret_by_id(model_state, secret_id)
+    if secret is None:
+        raise _engine.CliError(f"secret not found: {secret_id}")
+    if content:
+        secret["content"].update(content)
+        secret["revision"] = secret.get("revision", 1) + 1
+    _engine._save_state(state)
+    return 0

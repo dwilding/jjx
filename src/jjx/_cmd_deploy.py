@@ -10,8 +10,16 @@ import os
 import re
 import uuid
 from pathlib import Path
+from typing import Any
 
-from . import _engine
+from . import _engine, _virtual_postgres
+
+
+# Charm names that jjx handles as "virtual" charms — no real charm code is
+# run; instead jjx manages the workload and relation data directly.
+_VIRTUAL_CHARMS = {
+    "postgresql-k8s": "postgresql",
+}
 
 
 _DOCKER_PUBLISH_RE = re.compile(r"^(?P<host_port>\d{1,5}):(?P<container_port>\d{1,5})$")
@@ -71,7 +79,8 @@ def _parse_deploy_args(args: list[str]) -> tuple[str, str, dict[str, str]]:
         i += 1
 
     if app_name is None:
-        raise _engine.CliError("deploy requires an application name")
+        # Default the app name to the charm name (like Juju does).
+        app_name = charm_path
     return charm_path, app_name, resources
 
 
@@ -115,6 +124,13 @@ def deploy(args: list[str], model: str | None) -> int:
     existing = model_state["apps"].get(app_name)
     if existing and existing.get("container_name"):
         _engine._docker_rm(existing["container_name"])
+
+    # Handle virtual charms (e.g. postgresql-k8s) — no charm code, no Pebble.
+    virtual_kind = _VIRTUAL_CHARMS.get(charm_path)
+    if virtual_kind is None and app_name:
+        virtual_kind = _VIRTUAL_CHARMS.get(app_name)
+    if virtual_kind is not None:
+        return _deploy_virtual(state, model_name, app_name, virtual_kind)
 
     charm_source = _engine._discover_charm_source(charm_path, app_name)
     workload, resource_name = _workload_spec(charm_source)
@@ -191,5 +207,51 @@ def deploy(args: list[str], model: str | None) -> int:
 
     state = _engine._load_state()
     state["models"][model_name]["apps"][app_name]["updated_at"] = _engine._now_iso()
+    _engine._save_state(state)
+    return 0
+
+
+def _deploy_virtual(
+    state: dict[str, Any],
+    model_name: str,
+    app_name: str,
+    virtual_kind: str,
+) -> int:
+    """Deploy a virtual charm (no charm code, no Pebble).
+
+    For postgresql, this starts a real PostgreSQL container and records the
+    app as active in state. The relation data is populated later when
+    ``juju integrate`` is called.
+    """
+    model_state = state["models"][model_name]
+
+    if virtual_kind == "postgresql":
+        # The database name is fixed for now; the charm requests "names_db".
+        # We'll read it from the relation when integrate is called, but we
+        # need a default DB to create at deploy time.
+        database_name = "names_db"
+        pg_info = _virtual_postgres.start_postgres(model_name, app_name, database_name)
+        model_state["apps"][app_name] = {
+            "charm": app_name,
+            "charm_source": "",
+            "virtual": True,
+            "virtual_kind": virtual_kind,
+            "resources": {},
+            "config": {},
+            "container_name": pg_info["container_name"],
+            "container_id": pg_info["container_id"],
+            "unit": f"{app_name}/0",
+            "workload": "",
+            "pg_info": pg_info,
+            "unit_status": _engine._status_dict("active", ""),
+            "app_status": _engine._status_dict("active", ""),
+            "updated_at": _engine._now_iso(),
+        }
+        _engine._append_log(
+            model_state, f"virtual {app_name} deployed (postgres at {pg_info['ip_address']})"
+        )
+    else:
+        raise _engine.CliError(f"unknown virtual charm kind: {virtual_kind}")
+
     _engine._save_state(state)
     return 0
