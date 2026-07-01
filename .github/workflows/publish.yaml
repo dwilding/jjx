@@ -25,7 +25,7 @@ jobs:
       - name: Build package
         run: uv build
       - name: Attest package provenance
-        uses: actions/attest-build-provenance@v4
+        uses: actions/attest-build-provenance@v4.1.0
         with:
           subject-path: "dist/*"
       - name: Publish package
