@@ -34,20 +34,8 @@ jobs:
           bwrap --ro-bind / / --dev /dev --proc /proc -- true
       - name: Install uv
         uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39  # v8.2.0
-      - name: Diagnostics
-        shell: bash
-        run: |
-          echo "=== uv version ==="
-          uv --version
-          echo "=== UV_PYTHON ==="
-          echo "UV_PYTHON=${UV_PYTHON}"
-          echo "=== charm dir contents ==="
-          ls -la tests/functional/charms/k8s-4-action/
-          echo "=== charm pyproject.toml ==="
-          cat tests/functional/charms/k8s-4-action/pyproject.toml
       - name: Run functional tests
         env:
           UV_PYTHON: '3.10'
         shell: bash
-        # -s disables output capture so diagnostic prints are visible in the CI log
-        run: uv run pytest -vv -s tests/functional
+        run: uvx --from rust-just@1.52.0 just functional
