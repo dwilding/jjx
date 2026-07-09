@@ -49,8 +49,4 @@ def test_workload_version_is_set(juju: jubilant.Juju):
     response = urllib.request.urlopen(f"http://{unit_ip}:8000/version")
     data = json.loads(response.read())
     version = data["version"]
-    # Ideally, the test should get the version directly from the workload application
-    # (for example, through an API call) and use that in this assertion.
-    # For simplicity, we hardcode the version here. We update the tutorial whenever we
-    # release a new version of api_demo_server.
-    assert version == "1.0.4"
+    assert version == "1.0.4"  # Hardcoded for simplicity.
