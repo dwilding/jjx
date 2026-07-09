@@ -1,3 +1,4 @@
+import os
 import pathlib
 import shutil
 import subprocess
@@ -11,6 +12,22 @@ CHARM_PARAMS = [
     for dir in sorted(CHARMS_DIR.iterdir(), key=lambda d: d.name)
     if dir.is_dir()
 ]
+
+
+@pytest.fixture(scope="session", autouse=True)
+def uv_no_config():
+    # Charm dirs are copied to .tmp/ inside the jjx project, so uv walks up
+    # and discovers the parent jjx project's [tool.uv] settings (e.g.
+    # exclude-newer), contaminating the charm's environment. UV_NO_CONFIG=1
+    # tells uv to ignore [tool.uv] config sections entirely. The charms have
+    # no [tool.uv] sections of their own, so this is safe.
+    old = os.environ.get("UV_NO_CONFIG")
+    os.environ["UV_NO_CONFIG"] = "1"
+    yield
+    if old is None:
+        os.environ.pop("UV_NO_CONFIG", None)
+    else:
+        os.environ["UV_NO_CONFIG"] = old
 
 
 @pytest.fixture(scope="session", autouse=True)
