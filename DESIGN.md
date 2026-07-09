@@ -20,22 +20,28 @@ Optional flags:
 
 ## customization
 
-Pytest arguments can be overridden in the charm project's `pyproject.toml`:
+Additional pytest arguments can be appended to `jjx`'s built-in defaults in the charm project's `pyproject.toml`:
 
 ```toml
 [tool.jjx]
-pytest-args = ["-v", "tests/integration", "--no-juju-teardown"]
+pytest-extra-args = ["-v", "-k", "test_deploy"]
 ```
 
-If `pytest-args` is not set, `jjx` defaults to `["tests/integration", "--no-juju-teardown"]`.
+`jjx` always controls the test directory and teardown behavior; `pytest-extra-args` are appended after the built-in defaults. For full control, use `uv run` directly:
+
+```
+uv run --group integration --with jjx pytest <args>
+```
 
 ## under the hood
 
 `jjx` invokes pytest via:
 
 ```
-uv run --group integration [--with jjx | --python <venv>] pytest <pytest-args>
+uv run --group integration --with jjx pytest tests/integration --no-juju-teardown [<pytest-extra-args>]
 ```
+
+Internally, `jjx` may substitute `--with jjx` with `--python <venv>` or `--with-editable <path>` depending on how it was invoked (e.g. running from inside the charm's venv or from a local checkout). The user-facing equivalent is always `--with jjx`.
 
 The test fixture only needs a `.charm` file to exist; `jjx` creates one automatically before running pytest and removes it afterwards. `jjx` treats it as a deploy trigger and does not unpack it.
 

@@ -123,7 +123,7 @@ def jjx_pytest_env_args(charm_root: Path) -> list[str]:
 
 
 def jjx_pytest_args(charm_root: Path) -> list[str]:
-    """Return pytest args from [tool.jjx].pytest-args, or defaults if unset."""
+    """Return pytest args: built-in defaults plus any extra args from [tool.jjx].pytest-extra-args."""
     default_args = ["tests/integration", "--no-juju-teardown"]
     pyproject = charm_root / "pyproject.toml"
     if not pyproject.exists():
@@ -135,14 +135,14 @@ def jjx_pytest_args(charm_root: Path) -> list[str]:
     except tomllib.TOMLDecodeError as exc:
         raise _engine.CliError(f"ERROR: Invalid pyproject.toml: {exc}") from exc
 
-    pytest_args = config.get("tool", {}).get("jjx", {}).get("pytest-args")
-    if pytest_args is None:
+    extra_args = config.get("tool", {}).get("jjx", {}).get("pytest-extra-args")
+    if extra_args is None:
         return default_args
 
-    if not isinstance(pytest_args, list) or not all(isinstance(arg, str) for arg in pytest_args):
-        raise _engine.CliError("ERROR: [tool.jjx].pytest-args must be an array of strings")
+    if not isinstance(extra_args, list) or not all(isinstance(arg, str) for arg in extra_args):
+        raise _engine.CliError("ERROR: [tool.jjx].pytest-extra-args must be an array of strings")
 
-    return pytest_args
+    return [*default_args, *extra_args]
 
 
 def jjx_cli() -> int:

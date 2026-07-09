@@ -304,14 +304,17 @@ def test_jjx_pytest_fail(k8s_1_minimal_patched):
     assert "Removed container " in result.stdout
 
 
-def test_jjx_pytest_select_and_teardown(k8s_1_minimal_patched):
-    pytest_args = '["tests/integration", "-k", "test_deploy"]'  # Dropped --no-juju-teardown.
+def test_jjx_pytest_select(k8s_1_minimal_patched):
+    pytest_extra_args = '["-k", "test_deploy"]'
     pyproject = k8s_1_minimal_patched / "pyproject.toml"
-    pyproject.write_text(pyproject.read_text() + f"\n[tool.jjx]\npytest-args = {pytest_args}\n")
+    pyproject.write_text(
+        pyproject.read_text() + f"\n[tool.jjx]\npytest-extra-args = {pytest_extra_args}\n"
+    )
     command = [
         "uv",
         "run",
         "jjx",
+        "-d",
     ]
     result = subprocess.run(
         command,
@@ -322,16 +325,28 @@ def test_jjx_pytest_select_and_teardown(k8s_1_minimal_patched):
     assert result.returncode == 0, (
         f"jjx exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
-    assert "Started workload container " not in result.stdout
-    assert not (k8s_1_minimal_patched / ".jjx").exists()
+    assert "Started workload container " in result.stdout
+    assert (k8s_1_minimal_patched / ".jjx").exists()
+    # TEARDOWN
+    command = [
+        "uv",
+        "run",
+        "jjx",
+        "down",
+    ]
+    result = subprocess.run(
+        command,
+        cwd=k8s_1_minimal_patched,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, (
+        f"jjx down exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    )
+    assert "Removed container " in result.stdout
 
 
 def test_jjx_no_deploy(k8s_1_minimal_patched):
-    # Restore --no-juju-teardown.
-    pyproject = k8s_1_minimal_patched / "pyproject.toml"
-    pyproject.write_text(
-        pyproject.read_text().replace('"test_deploy"', '"test_deploy", "--no-juju-teardown"')
-    )
     # Break the integration test that deploys the charm.
     test_charm = k8s_1_minimal_patched / "tests" / "integration" / "test_charm.py"
     test_charm.write_text(test_charm.read_text().replace("juju.deploy", "juju.dont_deploy"))
