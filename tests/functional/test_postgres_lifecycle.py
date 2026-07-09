@@ -33,6 +33,11 @@ def assert_no_container(container_name: str) -> None:
 
 
 def test_charm_with_postgres(k8s_4_action):
+    # Print diagnostic info so CI logs show exactly what's being run and from where.
+    print(f"\n[diag] charm dir: {k8s_4_action}")
+    print(f"[diag] pyproject.toml exists: {(k8s_4_action / 'pyproject.toml').exists()}")
+    print(f"[diag] PACKAGE_DIR: {PACKAGE_DIR}")
+
     command = [
         "uvx",
         "--with-editable",
@@ -42,12 +47,23 @@ def test_charm_with_postgres(k8s_4_action):
         "-p",
         "8135:8000",
     ]
+    print(f"[diag] command: {' '.join(str(c) for c in command)}")
+
     result = subprocess.run(
         command,
         cwd=k8s_4_action,
-        check=True,
         capture_output=True,
         text=True,
+    )
+    # Print the full stdout/stderr so the inner pytest output is visible in CI
+    # (CalledProcessError truncates the middle, hiding the actual failure).
+    print(f"[diag] return code: {result.returncode}")
+    print("[diag] === jjx stdout ===")
+    print(result.stdout)
+    print("[diag] === jjx stderr ===")
+    print(result.stderr)
+    assert result.returncode == 0, (
+        f"jjx exited with code {result.returncode}; see stdout/stderr above"
     )
     model_name = result.stdout.split("--juju-model ")[1].split()[0]
     container_name = f"{model_name}-test-charm-fastapi-demo"
@@ -80,9 +96,16 @@ def test_charm_with_postgres(k8s_4_action):
     result = subprocess.run(
         command,
         cwd=k8s_4_action,
-        check=True,
         capture_output=True,
         text=True,
+    )
+    print(f"[diag] jjx down return code: {result.returncode}")
+    print("[diag] === jjx down stdout ===")
+    print(result.stdout)
+    print("[diag] === jjx down stderr ===")
+    print(result.stderr)
+    assert result.returncode == 0, (
+        f"jjx down exited with code {result.returncode}; see stdout/stderr above"
     )
     assert f"Removed container {container_name}" in result.stdout
     assert f"Removed container {postgres_container_name}" in result.stdout
