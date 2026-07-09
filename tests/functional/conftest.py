@@ -16,11 +16,10 @@ CHARM_PARAMS = [
 
 @pytest.fixture(scope="session", autouse=True)
 def uv_no_config():
-    # Charm dirs are copied to .tmp/ inside the jjx project, so uv walks up
-    # and discovers the parent jjx project's [tool.uv] settings (e.g.
-    # exclude-newer), contaminating the charm's environment. UV_NO_CONFIG=1
-    # tells uv to ignore [tool.uv] config sections entirely. The charms have
-    # no [tool.uv] sections of their own, so this is safe.
+    # Run tests with UV_NO_CONFIG to ignore repo's exclude-newer config.
+    # We're doing this because charms are copied to .tmp/ inside our repo.
+    # It's a preference to avoid contamination - not needed for correctness.
+    # It's heavy-handed, but OK because no test charms have their own uv config.
     old = os.environ.get("UV_NO_CONFIG")
     os.environ["UV_NO_CONFIG"] = "1"
     yield
