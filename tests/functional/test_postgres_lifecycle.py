@@ -45,9 +45,11 @@ def test_charm_with_postgres(k8s_4_action):
     result = subprocess.run(
         command,
         cwd=k8s_4_action,
-        check=True,
         capture_output=True,
         text=True,
+    )
+    assert result.returncode == 0, (
+        f"jjx exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
     model_name = result.stdout.split("--juju-model ")[1].split()[0]
     container_name = f"{model_name}-test-charm-fastapi-demo"
@@ -80,9 +82,11 @@ def test_charm_with_postgres(k8s_4_action):
     result = subprocess.run(
         command,
         cwd=k8s_4_action,
-        check=True,
         capture_output=True,
         text=True,
+    )
+    assert result.returncode == 0, (
+        f"jjx down exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
     assert f"Removed container {container_name}" in result.stdout
     assert f"Removed container {postgres_container_name}" in result.stdout

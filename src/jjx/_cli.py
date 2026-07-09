@@ -192,6 +192,11 @@ def jjx_cli() -> int:
 
     env = os.environ.copy()
     env["CHARM_PATH"] = str(placeholder_charm)
+    # The inner `uv run` must resolve the charm's project, not whatever venv
+    # launched us. When jjx is run via uvx (or `uv run`), VIRTUAL_ENV points
+    # at the launcher's venv; if inherited, uv may reuse it instead of creating
+    # one in the charm dir, causing pytest to run from the wrong project root.
+    env.pop("VIRTUAL_ENV", None)
     if docker_publish:
         env["JJX_DOCKER_PUBLISH"] = docker_publish
         external_port, internal_port = docker_publish.split(":", 1)

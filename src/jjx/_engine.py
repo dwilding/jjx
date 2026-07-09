@@ -410,6 +410,20 @@ def _docker_rm(container_name: str) -> None:
         capture_output=True,
         text=True,
     )
+    # Wait for the container to be fully removed. Without this, a subsequent
+    # _docker_run with the same name can race with the old container's cleanup,
+    # causing issues like postgres reporting "the database system is shutting down".
+    deadline = time.monotonic() + 10.0
+    while time.monotonic() < deadline:
+        result = subprocess.run(
+            ["docker", "inspect", "--format", "{{.State.Status}}", container_name],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            # Container no longer exists.
+            break
+        time.sleep(0.1)
     print(f"Removed container {container_name}")
 
 

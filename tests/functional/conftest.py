@@ -1,3 +1,4 @@
+import os
 import pathlib
 import shutil
 import subprocess
@@ -11,6 +12,21 @@ CHARM_PARAMS = [
     for dir in sorted(CHARMS_DIR.iterdir(), key=lambda d: d.name)
     if dir.is_dir()
 ]
+
+
+@pytest.fixture(scope="session", autouse=True)
+def uv_no_config():
+    # Run tests with UV_NO_CONFIG to ignore repo's exclude-newer config.
+    # We're doing this because charms are copied to .tmp/ inside our repo.
+    # It's a preference to avoid contamination - not needed for correctness.
+    # It's heavy-handed, but OK because no test charms have their own uv config.
+    old = os.environ.get("UV_NO_CONFIG")
+    os.environ["UV_NO_CONFIG"] = "1"
+    yield
+    if old is None:
+        os.environ.pop("UV_NO_CONFIG", None)
+    else:
+        os.environ["UV_NO_CONFIG"] = old
 
 
 @pytest.fixture(scope="session", autouse=True)
