@@ -6,7 +6,11 @@ import pytest
 
 PACKAGE_DIR = pathlib.Path(__file__).parent.parent.parent
 CHARMS_DIR = pathlib.Path(__file__).parent / "charms"
-CHARM_PARAMS = [pytest.param(dir, id=dir.name) for dir in CHARMS_DIR.iterdir() if dir.is_dir()]
+CHARM_PARAMS = [
+    pytest.param(dir, id=dir.name)
+    for dir in sorted(CHARMS_DIR.iterdir(), key=lambda d: d.name)
+    if dir.is_dir()
+]
 
 
 @pytest.fixture(scope="session", autouse=True)
