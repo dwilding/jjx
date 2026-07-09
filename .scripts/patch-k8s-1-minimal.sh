@@ -13,4 +13,4 @@ sed -i '/version = juju.status().apps\[APP_NAME\].version/c\
     data = json.loads(response.read())\
     version = data["version"]' test_charm.py
 
-tox -e format,lint
+UV_NO_CONFIG=1 tox -e format,lint  # Run with UV_NO_CONFIG to ignore repo's exclude-newer config.
