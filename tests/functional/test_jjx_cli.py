@@ -189,9 +189,11 @@ def test_jjx_detach_then_down(k8s_1_minimal_patched):
     result = subprocess.run(
         command,
         cwd=k8s_1_minimal_patched,
-        check=True,
         capture_output=True,
         text=True,
+    )
+    assert result.returncode == 0, (
+        f"jjx exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
     model_name = result.stdout.split("--juju-model ")[1].split()[0]
     container_name = f"{model_name}-test-charm-fastapi-demo"
@@ -208,9 +210,11 @@ def test_jjx_detach_then_down(k8s_1_minimal_patched):
     result = subprocess.run(
         command,
         cwd=k8s_1_minimal_patched,
-        check=True,
         capture_output=True,
         text=True,
+    )
+    assert result.returncode == 0, (
+        f"jjx down exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
     assert f"Removed container {container_name}" in result.stdout
     assert_no_container(container_name)
@@ -249,9 +253,11 @@ def test_jjx_detach_then_rerun(k8s_1_minimal_patched):
     result = subprocess.run(
         command,
         cwd=k8s_1_minimal_patched,
-        check=True,
         capture_output=True,
         text=True,
+    )
+    assert result.returncode == 0, (
+        f"jjx down exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
     assert result.stdout.count("Removed container ") == 1
 
@@ -289,9 +295,11 @@ def test_jjx_pytest_fail(k8s_1_minimal_patched):
     result = subprocess.run(
         command,
         cwd=k8s_1_minimal_patched,
-        check=True,
         capture_output=True,
         text=True,
+    )
+    assert result.returncode == 0, (
+        f"jjx down exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
     assert "Removed container " in result.stdout
 
@@ -308,9 +316,11 @@ def test_jjx_pytest_select_and_teardown(k8s_1_minimal_patched):
     result = subprocess.run(
         command,
         cwd=k8s_1_minimal_patched,
-        check=True,
         capture_output=True,
         text=True,
+    )
+    assert result.returncode == 0, (
+        f"jjx exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
     assert "Started workload container " not in result.stdout
     assert not (k8s_1_minimal_patched / ".jjx").exists()
