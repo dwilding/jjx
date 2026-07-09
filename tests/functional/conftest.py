@@ -6,7 +6,11 @@ import pytest
 
 PACKAGE_DIR = pathlib.Path(__file__).parent.parent.parent
 CHARMS_DIR = pathlib.Path(__file__).parent / "charms"
-CHARM_PARAMS = [pytest.param(dir, id=dir.name) for dir in CHARMS_DIR.iterdir() if dir.is_dir()]
+CHARM_PARAMS = [
+    pytest.param(dir, id=dir.name)
+    for dir in sorted(CHARMS_DIR.iterdir(), key=lambda d: d.name)
+    if dir.is_dir()
+]
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -64,4 +68,11 @@ def k8s_1_minimal_patched(temp_dir):
 def k8s_2_configurable(temp_dir):
     charm_dir = temp_dir / "k8s-2-configurable"
     prepare_charm_dir(CHARMS_DIR / "k8s-2-configurable", charm_dir)
+    return charm_dir
+
+
+@pytest.fixture(scope="module")
+def k8s_4_action(temp_dir):
+    charm_dir = temp_dir / "k8s-4-action"
+    prepare_charm_dir(CHARMS_DIR / "k8s-4-action", charm_dir)
     return charm_dir

@@ -51,15 +51,25 @@ Supported:
 - config updates and status reporting
 - hook tools needed by the charm
 - real Pebble in Docker
+- relations with virtual charms (see below)
 
 Not supported:
 
-- relations
 - peers or subordinates
 - multi-unit behavior
 - controller features beyond this test niche
 
 If a charm needs any of the above, use real Juju.
+
+## virtual charms
+
+`jjx` can recognize certain well-known charm names as "virtual" charms. A virtual charm has no charm code — `jjx` manages its workload and relation data directly.
+
+Currently supported:
+
+- `postgresql-k8s` — starts a real PostgreSQL 16 container in Docker and provides the `postgresql_client` interface. When a charm integrates with it, `jjx` populates the relation databag and creates a Juju secret with the database credentials, mimicking what the real `postgresql-k8s` charm's `DatabaseProvides` would write. The charm under test sees real relation data and real secrets, and can connect to the running PostgreSQL instance.
+
+Virtual charm containers are named `<model>-<app>-postgres` and are cleaned up on model teardown alongside workload containers.
 
 ## runtime model
 
@@ -79,7 +89,7 @@ The `.charm` file passed to deploy is a trigger only. `jjx` does not inspect or 
 - `./.jjx/state.json`
 - `./.jjx/hook-tools/`
 - `./.jjx/sitecustomize.py` (runtime Python shim injected into charm hook execution)
-- `./.jjx/charm/` (staged runtime charm directory with `src/`, `metadata.yaml`, `config.yaml`, and `.unit-state.db`)
+- `./.jjx/charm/` (staged runtime charm directory with `src/`, `lib/`, `metadata.yaml`, `config.yaml`, and `.unit-state.db`)
 
 `jjx` also caches the Pebble binary at `~/.cache/jjx/pebble-bin`, downloaded from canonical/pebble GitHub Releases on first use. This cache is shared across projects and persists across model teardowns to enable reuse across multiple deployments.
 
