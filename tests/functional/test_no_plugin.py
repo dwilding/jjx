@@ -71,6 +71,6 @@ def test_jjx_cli_needs_plugin(k8s_1_minimal_patched):
         text=True,
     )
     assert result.returncode == 1
-    assert "pytest-jubilant is not in the 'integration' dependency group" in result.stderr
+    assert "ERROR: pytest-jubilant is not in the 'integration' dependency group." in result.stderr
     assert not (k8s_1_minimal_patched / ".jjx").exists()
     assert not (k8s_1_minimal_patched / "placeholder.charm").exists()
