@@ -145,6 +145,28 @@ def jjx_pytest_args(charm_root: Path) -> list[str]:
     return [*default_args, *extra_args]
 
 
+def _has_pytest_jubilant(charm_root: Path) -> bool:
+    """Check whether pytest-jubilant is available in the charm's integration group."""
+    env = os.environ.copy()
+    env.pop("VIRTUAL_ENV", None)
+    result = subprocess.run(
+        [
+            "uv",
+            "run",
+            "--group",
+            "integration",
+            "--quiet",
+            "python",
+            "-c",
+            "import importlib.util; raise SystemExit(0 if importlib.util.find_spec('pytest_jubilant') else 1)",
+        ],
+        cwd=charm_root,
+        env=env,
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
 def jjx_cli() -> int:
     """Run the `jjx` CLI and return an exit code.
 
@@ -182,6 +204,10 @@ def jjx_cli() -> int:
     charm_root = _engine._project_root()
     try:
         pytest_args = jjx_pytest_args(charm_root)
+        if "--no-juju-teardown" in pytest_args and not _has_pytest_jubilant(charm_root):
+            raise _engine.CliError(
+                "ERROR: pytest-jubilant is not in the 'integration' dependency group."
+            )
     except _engine.CliError as exc:
         if exc.message:
             sys.stderr.write(exc.message + "\n")
