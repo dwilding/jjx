@@ -4,7 +4,7 @@ import subprocess
 PACKAGE_DIR = pathlib.Path(__file__).parent.parent.parent
 
 
-def test_pytest_after_plugin_removal(k8s_1_minimal_patched):
+def test_pass_without_plugin(k8s_1_minimal_patched):
     charm_dir = k8s_1_minimal_patched
     command = [
         "uv",
@@ -48,13 +48,27 @@ def test_pytest_after_plugin_removal(k8s_1_minimal_patched):
         "pytest",
         "tests/integration",
     ]
+    subprocess.run(
+        command,
+        cwd=charm_dir,
+        check=True,
+    )
+    assert not (charm_dir / ".jjx").exists()
+
+
+def test_jjx_cli_needs_plugin(k8s_1_minimal_patched):
+    charm_dir = k8s_1_minimal_patched
+    command = [
+        "uvx",
+        "--with-editable",
+        PACKAGE_DIR,
+        "jjx",
+    ]
     result = subprocess.run(
         command,
         cwd=charm_dir,
         capture_output=True,
         text=True,
     )
-    assert result.returncode == 0, (
-        f"pytest exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-    )
-    assert not (charm_dir / ".jjx").exists()
+    assert result.returncode == 1
+    assert "pytest-jubilant is not in the 'integration' dependency group" in result.stderr
