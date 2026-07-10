@@ -162,7 +162,7 @@ def deploy(args: list[str], model: str | None) -> int:
     python_exe = _engine._python_executable()
     _engine._ensure_hook_tools(python_exe)
 
-    socket_path = _engine._socket_path()
+    socket_path = jjx_dir / "socket"
     if socket_path.exists() or socket_path.is_symlink():
         socket_path.unlink()
 
@@ -193,6 +193,17 @@ def deploy(args: list[str], model: str | None) -> int:
     )
     model_state["apps"][app_name]["container_id"] = container_id
 
+    # Start the charm runner container — a persistent container that shares
+    # the workload's network namespace and runs charm hooks via docker exec.
+    _engine._ensure_charm_runner_image()
+    _engine._start_charm_runner(container_name, model_state["apps"][app_name])
+    _engine._save_state(state)
+
+    charm_runner_name = model_state["apps"][app_name].get("charm_runner_name", "")
+    container_python = model_state["apps"][app_name].get("container_python", "")
+    if charm_runner_name and container_python:
+        _engine._wait_for_charm_runner_socket(charm_runner_name, container_python)
+
     _engine._append_log(model_state, f"application {app_name} deployed with image {image}")
     _engine._save_state(state)
 
@@ -201,8 +212,12 @@ def deploy(args: list[str], model: str | None) -> int:
     except Exception:
         state = _engine._load_state()
         app_state = state.get("models", {}).get(model_name, {}).get("apps", {}).get(app_name)
-        if app_state and app_state.get("container_name"):
-            _engine._docker_rm(app_state["container_name"])
+        if app_state:
+            # Teardown order: workload → charm runner.
+            if app_state.get("container_name"):
+                _engine._docker_rm(app_state["container_name"])
+            if app_state.get("charm_runner_name"):
+                _engine._docker_rm(app_state["charm_runner_name"])
         raise
 
     state = _engine._load_state()

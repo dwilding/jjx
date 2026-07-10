@@ -18,7 +18,6 @@ No relations. No scaling. No actions (for now). No secrets (for now).
 ### Requirements
 
 - uv
-- [bubblewrap](https://github.com/containers/bubblewrap) for the lightweight sandbox
 - Docker
 
 ### Usage
