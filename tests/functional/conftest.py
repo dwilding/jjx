@@ -32,7 +32,6 @@ def uv_no_config():
 @pytest.fixture(scope="session", autouse=True)
 def system_ready():
     assert shutil.which("docker") is not None, "docker CLI is not installed"
-    assert shutil.which("bwrap") is not None, "bubblewrap (bwrap) is not installed"
     command = [
         "docker",
         "ps",

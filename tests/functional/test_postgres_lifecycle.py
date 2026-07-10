@@ -53,8 +53,10 @@ def test_charm_with_postgres(k8s_4_action):
     )
     model_name = result.stdout.split("--juju-model ")[1].split()[0]
     container_name = f"{model_name}-test-charm-fastapi-demo"
+    operator_container_name = f"{model_name}-test-charm-operator"
     postgres_container_name = f"{model_name}-test-charm-postgres"
     assert_container(container_name)
+    assert_container(operator_container_name)
     assert_container(postgres_container_name)
     # Check that the workload can talk to the database.
     # This isn't covered by the charm's integration tests.
@@ -89,6 +91,8 @@ def test_charm_with_postgres(k8s_4_action):
         f"jjx down exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
     assert f"Removed container {container_name}" in result.stdout
+    assert f"Removed container {operator_container_name}" in result.stdout
     assert f"Removed container {postgres_container_name}" in result.stdout
     assert_no_container(container_name)
+    assert_no_container(operator_container_name)
     assert_no_container(postgres_container_name)

@@ -10,9 +10,7 @@ import json
 import os
 import re
 import shutil
-import socket
 import subprocess
-import sys
 import tarfile
 import time
 import uuid
@@ -29,31 +27,15 @@ import yaml
 STATE_DIR_NAME = ".jjx"
 STATE_FILE_NAME = "state.json"
 HOOK_TOOLS_DIR_NAME = "hook-tools"
-SOCKET_FILE_NAME = "socket"
 GITIGNORE_FILE_NAME = ".gitignore"
-SITECUSTOMIZE_FILE_NAME = "sitecustomize.py"
 
 PEBBLE_RELEASES_API = "https://api.github.com/repos/canonical/pebble/releases/latest"
 PEBBLE_RELEASES_DOWNLOAD = "https://github.com/canonical/pebble/releases/download/{tag}/{asset}"
 
-# Injected into the charm's Python environment to rewrite connect(127.0.0.1, port)
-# to connect(container_ip, port), mirroring the K8s pod shared-network-namespace
-# model where loopback addresses reach the workload container.
-_SITECUSTOMIZE_PY = """\
-import os as _os
-import socket as _socket
-
-_container_ip = _os.environ.get("JJX_CONTAINER_IP", "")
-if _container_ip:
-    _orig_connect = _socket.socket.connect
-
-    def _patched_connect(self, address):
-        if isinstance(address, tuple) and address[0] in ("127.0.0.1", "localhost", "::1"):
-            address = (_container_ip, *address[1:])
-        return _orig_connect(self, address)
-
-    _socket.socket.connect = _patched_connect
-"""
+# Charm runner container image. This is a chiseled Ubuntu image that contains
+# only the runtime libraries (glibc, libssl, libz, ca-certs) needed to run
+# Python. No shell, no Python, no Pebble — everything is bind-mounted.
+CHARM_RUNNER_IMAGE = "ubuntu/dotnet-deps:8.0-24.04_stable"
 
 
 @dataclass
@@ -98,14 +80,6 @@ def _state_path() -> Path:
 
 def _hook_tools_dir() -> Path:
     return _jjx_dir() / HOOK_TOOLS_DIR_NAME
-
-
-def _socket_path() -> Path:
-    return _jjx_dir() / SOCKET_FILE_NAME
-
-
-def _sitecustomize_path() -> Path:
-    return _jjx_dir() / SITECUSTOMIZE_FILE_NAME
 
 
 def _gitignore_path() -> Path:
@@ -509,6 +483,227 @@ def _docker_list_model_containers(model_name: str) -> list[str]:
     return [name for name in names if name.startswith(model_prefix)]
 
 
+def _resolve_uv_python() -> Path:
+    """Follow the charm's ``.venv/bin/python`` symlink to find the uv-managed Python directory.
+
+    Returns the directory containing the real Python installation (e.g.
+    ``~/.local/share/uv/python/cpython-3.14.0-linux-x86_64-gnu``).
+    """
+    venv_python = _project_venv_python()
+    if venv_python is None:
+        raise CliError("charm .venv not found; run 'uv sync' first")
+    real_python = venv_python.resolve()
+    # uv Python is at ~/.local/share/uv/python/cpython-3.X.Y-.../bin/python3.X
+    # The directory we want to bind-mount is the cpython-3.X.Y-... directory.
+    python_dir = real_python.parent.parent
+    if "cpython" not in python_dir.name or "uv" not in str(python_dir):
+        raise CliError(
+            f"charm Python is not uv-managed ({real_python}); "
+            "jjx currently requires uv-managed Python"
+        )
+    return python_dir
+
+
+def _container_python_binary(python_dir: Path) -> str:
+    """Return the container-internal Python binary path (e.g. ``/python/bin/python3.14``)."""
+    # The uv Python directory has a bin/ folder with python3.XX
+    bin_dir = python_dir / "bin"
+    for candidate in sorted(bin_dir.iterdir()):
+        if candidate.name.startswith("python3."):
+            return f"/python/bin/{candidate.name}"
+    raise CliError(f"could not find python3.X binary in {bin_dir}")
+
+
+def _charm_runner_name(model_name: str) -> str:
+    """Return the Docker container name for the charm runner.
+
+    The charm runner is named ``<model>-operator``, mirroring the postgres
+    naming convention (``<model>-<app>-postgres``) — no app name, just a
+    fixed suffix.
+    """
+    return _sanitize_container_name(f"{model_name}-operator")
+
+
+def _ensure_charm_runner_image() -> None:
+    """Pull the charm runner image if it is not present locally."""
+    result = subprocess.run(
+        ["docker", "image", "inspect", CHARM_RUNNER_IMAGE],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        return
+    print(f"Pulling charm runner image {CHARM_RUNNER_IMAGE} ...", flush=True)
+    try:
+        subprocess.run(
+            ["docker", "pull", CHARM_RUNNER_IMAGE],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise CliError(
+            f"failed to pull charm runner image {CHARM_RUNNER_IMAGE}: "
+            f"{exc.stderr.strip() or exc.stdout.strip()}"
+        ) from None
+
+
+def _start_charm_runner(
+    model_name: str,
+    workload_container_name: str,
+    app_state: dict[str, Any],
+) -> str:
+    """Start the charm runner container and return its name.
+
+    The charm runner shares the workload container's network namespace
+    (``--network=container:<workload>``), so ``localhost`` inside the charm
+    runner reaches the workload directly — matching real K8s pod semantics.
+    """
+    charm_runner_name = _charm_runner_name(model_name)
+    _docker_rm(charm_runner_name)
+
+    python_dir = _resolve_uv_python()
+    container_python = _container_python_binary(python_dir)
+    project_root = _project_root()
+    jjx_dir = _jjx_dir()
+    venv_dir = project_root / ".venv"
+    package_root = Path(__file__).resolve().parents[2]
+
+    workload = app_state.get("workload", "")
+    if not isinstance(workload, str) or not workload:
+        raise CliError("application has no workload container configured")
+
+    # Determine the venv site-packages directory for PYTHONPATH.
+    venv_site_packages = _venv_site_packages(venv_dir, container_python)
+
+    mounts: list[tuple[str, str, bool]] = [
+        (str(python_dir), "/python", True),
+        (str(venv_dir), "/venv", True),
+        (str(package_root), "/jjx-src", True),
+        (str(jjx_dir / "charm"), "/charm", False),
+        (str(jjx_dir), "/jjx", False),
+    ]
+
+    pythonpath_parts = []
+    if venv_site_packages:
+        pythonpath_parts.append(f"/venv/lib/{venv_site_packages}")
+    # /jjx-src is the project root; the jjx package is under src/jjx.
+    pythonpath_parts.append("/jjx-src/src")
+    pythonpath_parts.append("/charm/lib")
+    container_pythonpath = ":".join(pythonpath_parts)
+
+    container_id = _docker_run(
+        CHARM_RUNNER_IMAGE,
+        charm_runner_name,
+        mounts=mounts,
+        network=f"container:{workload_container_name}",
+        env={
+            "PYTHONPATH": container_pythonpath,
+            "TERM": "dumb",
+        },
+        user=f"{os.getuid()}:{os.getgid()}",
+        workdir="/charm",
+        entrypoint=container_python,
+        command=["-c", "import time; time.sleep(999999)"],
+    )
+
+    # Create the pebble socket symlink so ops can find it at the expected path.
+    # ops constructs the socket path from JUJU_CHARM_DIR: /charm/containers/<workload>/pebble.socket
+    # Use Python instead of mkdir/ln because the charm runner image is minimal
+    # and may not have coreutils in PATH.
+    pebble_socket_dir = f"/charm/containers/{workload}"
+    _docker_exec(
+        charm_runner_name,
+        [
+            container_python,
+            "-c",
+            f"import os, pathlib; pathlib.Path({pebble_socket_dir!r}).mkdir(parents=True, exist_ok=True); "
+            f"src='/jjx/socket'; dst={pebble_socket_dir!r}+'/pebble.socket'; "
+            f"os.symlink(src, dst) if not os.path.exists(dst) else None",
+        ],
+    )
+
+    app_state["charm_runner_name"] = charm_runner_name
+    app_state["charm_runner_id"] = container_id
+    app_state["container_python"] = container_python
+    app_state["container_pythonpath"] = container_pythonpath
+
+    return charm_runner_name
+
+
+def _venv_site_packages(venv_dir: Path, container_python: str) -> str:
+    """Return the site-packages directory name relative to /venv, or empty string.
+
+    e.g. ``python3.14/site-packages`` — the path inside the container would be
+    ``/venv/lib/python3.14/site-packages``.
+    """
+    # container_python is like "/python/bin/python3.14"
+    py_version = container_python.rsplit("python", 1)[-1]  # e.g. "3.14"
+    if not py_version:
+        return ""
+    # venv site-packages is at .venv/lib/python3.XX/site-packages
+    candidate = venv_dir / "lib" / f"python{py_version}" / "site-packages"
+    if candidate.is_dir():
+        return f"python{py_version}/site-packages"
+    return ""
+
+
+def _docker_exec(
+    container_name: str,
+    command: list[str],
+    env: dict[str, str] | None = None,
+    timeout: float | None = None,
+    check: bool = True,
+) -> subprocess.CompletedProcess[str]:
+    """Run a command inside a container via ``docker exec``."""
+    cmd = ["docker", "exec"]
+    for key, value in (env or {}).items():
+        cmd.extend(["-e", f"{key}={value}"])
+    cmd.append(container_name)
+    cmd.extend(command)
+    try:
+        return subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=check,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise CliError(
+            f"docker exec failed in {container_name}: {exc.stderr.strip() or exc.stdout.strip()}"
+        ) from None
+    except subprocess.TimeoutExpired as exc:
+        raise CliError(f"docker exec timed out in {container_name}: {exc}") from None
+
+
+def _wait_for_charm_runner_socket(
+    charm_runner_name: str,
+    container_python: str,
+    timeout: float = 20.0,
+) -> None:
+    """Wait for the Pebble socket to be connectable inside the charm runner."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        result = subprocess.run(
+            [
+                "docker",
+                "exec",
+                charm_runner_name,
+                container_python,
+                "-c",
+                "import socket; s=socket.socket(socket.AF_UNIX); s.settimeout(0.5); "
+                "s.connect('/jjx/socket'); s.close()",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            return
+        time.sleep(0.1)
+    raise CliError(f"timed out waiting for pebble socket in charm runner {charm_runner_name}")
+
+
 def _resolve_pebble_binary() -> Path:
     cache_path = Path.home() / ".cache" / "jjx" / "pebble-bin"
     if cache_path.exists():
@@ -579,33 +774,6 @@ def _resolve_pebble_binary() -> Path:
     return cache_path
 
 
-def _wait_for_socket(socket_path: Path, timeout: float = 20.0) -> None:
-    deadline = time.monotonic() + timeout
-    connect_paths = [str(socket_path)]
-    try:
-        rel = socket_path.relative_to(_project_root())
-        rel_path = str(rel)
-        if rel_path and rel_path not in connect_paths:
-            # Prefer shorter relative paths to avoid AF_UNIX path-length limits.
-            connect_paths.insert(0, rel_path)
-    except ValueError:
-        pass
-
-    while time.monotonic() < deadline:
-        if socket_path.exists():
-            for connect_path in connect_paths:
-                try:
-                    probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-                    probe.settimeout(0.2)
-                    probe.connect(connect_path)
-                    probe.close()
-                    return
-                except OSError:
-                    continue
-        time.sleep(0.1)
-    raise CliError(f"timed out waiting for pebble socket: {socket_path}")
-
-
 def _project_venv_python() -> Path | None:
     venv_bin = _project_root() / ".venv" / "bin"
     for name in ("python3", "python"):
@@ -622,37 +790,14 @@ def _project_venv_bin() -> Path | None:
     return None
 
 
-def _python_can_import_jjx(python_exe: Path) -> bool:
-    result = subprocess.run(
-        [str(python_exe), "-c", "import jjx"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    return result.returncode == 0
-
-
 def _python_executable() -> str:
-    project_python = _project_venv_python()
-    if project_python and _python_can_import_jjx(project_python):
-        return str(project_python)
+    """Return the container-internal Python path for hook tool scripts.
 
-    python_exe = Path(sys.executable)
-    if python_exe.exists() and _python_can_import_jjx(python_exe):
-        return str(python_exe)
-    raise CliError(
-        f"no usable Python runtime for jjx hook tools (sys.executable={sys.executable!r})"
-    )
-
-
-def _charm_python_executable() -> str:
-    project_python = _project_venv_python()
-    if project_python is not None:
-        return str(project_python)
-
-    python_exe = Path(sys.executable)
-    if python_exe.exists():
-        return str(python_exe)
-    raise CliError(f"sys.executable is not usable: {sys.executable!r}")
+    Hook tools run inside the charm runner container, so the Python path must
+    be container-internal (e.g. ``/python/bin/python3.14``).
+    """
+    python_dir = _resolve_uv_python()
+    return _container_python_binary(python_dir)
 
 
 def _ensure_hook_tools(python_exe: str) -> None:
@@ -683,10 +828,10 @@ def _ensure_hook_tools(python_exe: str) -> None:
         path = root / tool
         path.write_text(
             (
-                "#!/bin/sh\n"
-                f'exec "{python_exe}" -c \'import sys; '
-                "import jjx; "
-                f'raise SystemExit(jjx.run_hook_tool("{tool}", sys.argv[1:]))\' "$@"\n'
+                f"#!{python_exe}\n"
+                "import sys\n"
+                "import jjx\n"
+                f'raise SystemExit(jjx.run_hook_tool("{tool}", sys.argv[1:]))\n'
             ),
             encoding="utf-8",
         )
@@ -696,13 +841,16 @@ def _ensure_hook_tools(python_exe: str) -> None:
 def _stage_runtime_charm(charm_source: Path, runtime_charm_dir: Path) -> None:
     runtime_charm_dir.mkdir(parents=True, exist_ok=True)
 
+    # Copy src/ and lib/ rather than symlinking — the charm runner container
+    # only has runtime_charm_dir bind-mounted at /charm, so symlinks pointing
+    # to host paths would be unreachable inside the container.
     src_link = runtime_charm_dir / "src"
     if src_link.exists() or src_link.is_symlink():
         if src_link.is_dir() and not src_link.is_symlink():
             shutil.rmtree(src_link)
         else:
             src_link.unlink()
-    src_link.symlink_to(charm_source / "src", target_is_directory=True)
+    shutil.copytree(charm_source / "src", src_link)
 
     # Stage the lib/ directory (charm libraries) if it exists.
     lib_source = charm_source / "lib"
@@ -713,7 +861,7 @@ def _stage_runtime_charm(charm_source: Path, runtime_charm_dir: Path) -> None:
                 shutil.rmtree(lib_link)
             else:
                 lib_link.unlink()
-        lib_link.symlink_to(lib_source, target_is_directory=True)
+        shutil.copytree(lib_source, lib_link)
 
     data = _read_yaml(charm_source / "charmcraft.yaml")
 
@@ -768,7 +916,7 @@ def _build_charm_env(
 ) -> dict[str, str]:
     unit_name = app_state.get("unit", f"{app_name}/0")
 
-    env = os.environ.copy()
+    env: dict[str, str] = {}
     env.update(
         {
             "JUJU_DISPATCH_PATH": dispatch_path,
@@ -777,12 +925,12 @@ def _build_charm_env(
             "JUJU_MODEL_UUID": model_state["uuid"],
             "JUJU_UNIT_NAME": unit_name,
             "JUJU_VERSION": "3.6.0",
-            # Inside bubblewrap, the charm directory is bind-mounted at /charm,
-            # matching the path real Juju uses for JUJU_CHARM_DIR.
+            # Inside the charm runner container, the charm directory is
+            # bind-mounted at /charm, matching the path real Juju uses.
             "JUJU_CHARM_DIR": "/charm",
-            # Hook tools run inside bubblewrap where cwd is /charm; they need
-            # to find .jjx/state.json, so pass the state directory explicitly.
-            "JJX_STATE_DIR": str(_jjx_dir()),
+            # Hook tools run inside the charm runner where cwd is /charm; they
+            # need to find .jjx/state.json, so pass the state directory explicitly.
+            "JJX_STATE_DIR": "/jjx",
         }
     )
 
@@ -803,66 +951,15 @@ def _build_charm_env(
         for var in ("JUJU_RELATION", "JUJU_RELATION_ID", "JUJU_REMOTE_APP", "JUJU_REMOTE_UNIT"):
             env.pop(var, None)
 
-    path_entries = [str(_hook_tools_dir())]
-    project_venv_bin = _project_venv_bin()
-    if project_venv_bin is not None:
-        path_entries.append(str(project_venv_bin))
-    path_entries.append(env.get("PATH", ""))
-    env["PATH"] = ":".join(entry for entry in path_entries if entry)
+    # Hook tools are at /jjx/hook-tools inside the charm runner container.
+    env["PATH"] = "/jjx/hook-tools:/usr/bin:/bin"
+    # Hook tools do `import jjx`, so they need the same PYTHONPATH as the
+    # charm runner container itself.  docker exec does NOT inherit env vars
+    # set at docker run time, so we must pass it explicitly.
+    pythonpath = app_state.get("container_pythonpath")
+    if pythonpath:
+        env["PYTHONPATH"] = pythonpath
     return env
-
-
-def _bwrap_cmd(charm_root: Path, workload_name: str) -> list[str]:
-    project_root = _project_root()
-    pebble_socket = f"/charm/containers/{workload_name}/pebble.socket"
-    return [
-        "bwrap",
-        "--tmpfs",
-        "/",
-        "--ro-bind",
-        "/usr",
-        "/usr",
-        "--ro-bind",
-        "/bin",
-        "/bin",
-        "--ro-bind",
-        "/lib",
-        "/lib",
-        "--ro-bind",
-        "/lib64",
-        "/lib64",
-        "--ro-bind",
-        "/etc",
-        "/etc",
-        "--ro-bind",
-        "/home",
-        "/home",
-        "--bind",
-        str(project_root),
-        str(project_root),
-        "--bind",
-        "/tmp",
-        "/tmp",
-        "--dev",
-        "/dev",
-        "--proc",
-        "/proc",
-        # Bind the staged charm directory to /charm so that JUJU_CHARM_DIR=/charm
-        # matches real Juju, and charms that hardcode /charm paths work correctly.
-        "--bind",
-        str(charm_root),
-        "/charm",
-        "--dir",
-        "/charm/containers",
-        "--dir",
-        f"/charm/containers/{workload_name}",
-        "--bind",
-        str(_socket_path()),
-        pebble_socket,
-        "--chdir",
-        "/charm",
-        "--",
-    ]
 
 
 def _run_charm_event(
@@ -882,18 +979,14 @@ def _run_charm_event(
 
     hook_tool_python = _python_executable()
     _ensure_hook_tools(hook_tool_python)
-    charm_python = _charm_python_executable()
 
     runtime = app_state.get("runtime") or {}
     charm_root = Path(runtime.get("charm_dir", app_state["charm_source"])).resolve()
     charm_entrypoint = charm_root / "src" / "charm.py"
     if not charm_entrypoint.exists():
         raise CliError(f"charm entrypoint not found: {charm_entrypoint}")
-    # Inside bubblewrap, charm_root is bind-mounted at /charm, so the
-    # entrypoint path the charm Python receives must use the sandbox path.
+    # Inside the charm runner, charm_root is bind-mounted at /charm.
     charm_entry = "/charm/src/charm.py"
-
-    _wait_for_socket(_socket_path())
 
     workload = workload_name or app_state.get("workload")
     if not isinstance(workload, str) or not workload:
@@ -909,39 +1002,26 @@ def _run_charm_event(
         relation=relation,
     )
 
-    site_paths = [p for p in sys.path if "site-packages" in p and Path(p).exists()]
-    # Inside bubblewrap, the charm is at /charm, so charm libraries in /charm/lib
-    # must be on PYTHONPATH for imports like `from charms.data_platform_libs...`.
-    site_paths.append("/charm/lib")
-    existing_pythonpath = env.get("PYTHONPATH", "")
-    if existing_pythonpath:
-        site_paths.append(existing_pythonpath)
-    if site_paths:
-        env["PYTHONPATH"] = ":".join(site_paths)
-
     container_name = app_state.get("container_name", "")
     if not container_name:
         raise CliError(f"application {app_name} has no container name in state")
     container = _docker_container_details(container_name)
     if not container.running:
         raise CliError(f"container {container.name} is not running")
-    env["JJX_CONTAINER_IP"] = container.ip_address
 
-    sitecustomize_path = _sitecustomize_path()
-    sitecustomize_path.parent.mkdir(parents=True, exist_ok=True)
-    sitecustomize_path.write_text(
-        _SITECUSTOMIZE_PY,
-        encoding="utf-8",
-    )
-    sitecustomize_parent = sitecustomize_path.parent
-    env["PYTHONPATH"] = (
-        f"{sitecustomize_parent}:{env.get('PYTHONPATH', '')}"
-        if env.get("PYTHONPATH")
-        else str(sitecustomize_parent)
-    )
+    charm_runner_name = app_state.get("charm_runner_name", "")
+    if not charm_runner_name:
+        raise CliError(f"application {app_name} has no charm runner in state")
 
-    cmd = _bwrap_cmd(charm_root, workload) + [charm_python, charm_entry]
-    proc = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    container_python = app_state.get("container_python") or hook_tool_python
+    _wait_for_charm_runner_socket(charm_runner_name, container_python)
+
+    proc = _docker_exec(
+        charm_runner_name,
+        [container_python, charm_entry],
+        env=env,
+        check=False,
+    )
 
     state = _load_state()
     model_state = state["models"][model_name]

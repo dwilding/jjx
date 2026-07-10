@@ -29,6 +29,11 @@ def remove_application(args: list[str], model: str | None) -> int:
     if container_name:
         _engine._docker_rm(container_name)
 
+    # Remove the charm runner container after the workload container.
+    charm_runner_name = app_state.get("charm_runner_name")
+    if charm_runner_name:
+        _engine._docker_rm(charm_runner_name)
+
     _engine._append_log(model_state, f"application {app_name} removed")
     _engine._save_state(state)
     return 0

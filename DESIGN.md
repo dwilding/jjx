@@ -75,7 +75,7 @@ Currently supported:
 
 - `postgresql-k8s` — starts a real PostgreSQL 16 container in Docker and provides the `postgresql_client` interface. When a charm integrates with it, `jjx` populates the relation databag and creates a Juju secret with the database credentials, mimicking what the real `postgresql-k8s` charm's `DatabaseProvides` would write. The charm under test sees real relation data and real secrets, and can connect to the running PostgreSQL instance.
 
-Virtual charm containers are named `<model>-<app>-postgres` and are cleaned up on model teardown alongside workload containers.
+Virtual charm containers are named `<model>-<app>-postgres` and are cleaned up on model teardown alongside workload containers. They are removed first, before workload containers.
 
 ## runtime model
 
@@ -83,7 +83,7 @@ Virtual charm containers are named `<model>-<app>-postgres` and are cleaned up o
 
 State is local to the project working directory.
 
-Charm code is executed from `./src/` with the Python interpreter inherited from the outer `uv run` process.
+Charm code is executed from `./src/` inside a persistent Docker container (the "charm runner") that shares the workload container's network namespace. The Python interpreter is bind-mounted from the host `uv` environment.
 
 The `.charm` file passed to deploy is a trigger only. `jjx` does not inspect or extract it.
 
@@ -94,34 +94,44 @@ The `.charm` file passed to deploy is a trigger only. `jjx` does not inspect or 
 - `./.jjx/.gitignore`
 - `./.jjx/state.json`
 - `./.jjx/hook-tools/`
-- `./.jjx/sitecustomize.py` (runtime Python shim injected into charm hook execution)
 - `./.jjx/charm/` (staged runtime charm directory with `src/`, `lib/`, `metadata.yaml`, `config.yaml`, and `.unit-state.db`)
+- `./.jjx/socket` (Pebble API Unix socket, bind-mounted into both the workload and charm runner containers)
 
 `jjx` also caches the Pebble binary at `~/.cache/jjx/pebble-bin`, downloaded from canonical/pebble GitHub Releases on first use. This cache is shared across projects and persists across model teardowns to enable reuse across multiple deployments.
 
 Notes on generated runtime files:
 
 - Pebble runtime files are created inside the workload container under Pebble's default state path: `/var/lib/pebble/default`.
-- `./.jjx/socket` is a host-side bind target for the Pebble API socket, used to bridge the containerized Pebble daemon to host-side hook execution.
-- `JJX_CONTAINER_IP` is injected into the hook process environment from Docker inspect output for the workload container.
-- `JJX_STATE_DIR` is injected into the hook process environment pointing at the `.jjx/` directory. Inside `bubblewrap`, the charm's cwd is `/charm`, so hook tools (which call back into `jjx` to read and write state) cannot discover `.jjx/` by walking up from cwd. This env var lets them locate state directly.
-- `./.jjx/sitecustomize.py` rewrites outbound Python socket connects from loopback addresses (`127.0.0.1`, `localhost`, `::1`) to the workload container bridge IP with the same port.
-- `./.jjx/charm/.unit-state.db` is created by charm runtime state persistence (written by `ops` via `sqlite3` to `JUJU_CHARM_DIR/.unit-state.db`, which inside `bubblewrap` is `/charm/.unit-state.db`).
+- `./.jjx/socket` is the Pebble API Unix socket. It is bind-mounted into the workload container (where Pebble creates it) and into the charm runner container (where charm code and hook tools connect to it).
+- `JJX_STATE_DIR` is set to `/jjx` (the in-container mount point of `.jjx/`) in the charm runner environment. Hook tools call back into `jjx` to read and write state; this env var lets them locate state directly.
+- `./.jjx/charm/.unit-state.db` is created by charm runtime state persistence (written by `ops` via `sqlite3` to `JUJU_CHARM_DIR/.unit-state.db`, which inside the charm runner is `/charm/.unit-state.db`).
 
 When the model is torn down, jjx removes the entire `./.jjx/` directory. The `~/.cache/jjx/pebble-bin` cache is kept for reuse across subsequent deployments.
 
-The socket path is intentionally short to reduce Unix socket path-length risk.
-Very long working-directory paths can still exceed platform limits.
+### charm runner container
 
-### bubblewrap and the `/charm` filesystem
+The charm runner is a persistent Docker container that executes charm hooks.
 
-`bubblewrap` serves two purposes: filesystem isolation and filesystem fidelity.
+**Image**: `ubuntu/dotnet-deps:8.0-24.04_stable` — a chiseled Ubuntu image containing only the runtime libraries (glibc, libssl, libz, ca-certs) needed to run Python. No shell, no coreutils, no Python, no Pebble — everything is bind-mounted from the host. Because there is no `/bin/sh`, hook tool scripts use a direct Python shebang (`#!/python/bin/python3.XX`) rather than `#!/bin/sh`.
 
-For **fidelity**, `bubblewrap` bind-mounts the staged charm directory (`./.jjx/charm/`) to `/charm` inside the sandbox. This matches real Juju, where the charm directory *is* `/charm` and `JUJU_CHARM_DIR=/charm`. Charms that hardcode `/charm` paths for file I/O (not just the Pebble socket) work correctly because `/charm` is a real directory they can read and write. `JUJU_CHARM_DIR` is set to `/charm`, so `ops` writes `.unit-state.db` to `/charm/.unit-state.db` — the same path real Juju uses.
+**Naming**: `<model>-operator` (e.g. `jjx-default-operator`). Like the postgres container naming, this uses a fixed suffix with no app name.
 
-For **isolation**, `bubblewrap` gives the charm process a restricted filesystem view: a tmpfs root with read-only system directories (`/usr`, `/bin`, `/lib`, `/lib64`, `/etc`, `/home`) and write access only to `/charm`, the project root, and `/tmp`. This prevents accidental host-side writes and hides host-specific paths that could reduce test reproducibility across machines.
+**Network**: The charm runner uses `--network=container:<workload>`, sharing the workload container's network namespace. This means charm code that connects to loopback addresses (`127.0.0.1`, `localhost`, `::1`) reaches the workload container directly.
 
-`sitecustomize.py` handles a complementary concern that `bubblewrap` cannot: network path fidelity. It rewrites outbound TCP connects from `0.0.0.0:<port>` to the workload container bridge IP, so charm code that binds to `0.0.0.0` reaches the container without exposing ports on the host. `bubblewrap` is a filesystem sandbox, not a network proxy, so these two mechanisms are orthogonal and both necessary.
+**Bind mounts** (all read-only unless noted):
+- Host Python (from `uv`) → `/python` (ro)
+- Host venv site-packages → `/venv` (ro)
+- jjx package source → `/jjx-src` (ro) — the `jjx` package itself lives at `/jjx-src/src/jjx/`
+- `.jjx/charm/` → `/charm` (rw)
+- `.jjx/` → `/jjx` (rw)
+
+**Environment**: The charm runner container is started with `PYTHONPATH` set to `/venv/lib/python3.XX/site-packages:/jjx-src/src:/charm/lib`. However, `docker exec` does not inherit environment variables from `docker run`, so `jjx` passes `PATH` and `PYTHONPATH` explicitly via `docker exec -e` for each hook execution. This ensures both the charm process and its hook tool subprocesses can find `jjx` and the hook tools.
+
+**Pebble socket**: A symlink is created inside the charm runner at `/charm/containers/<workload>/pebble.socket` → `/jjx/socket`, so `ops` can find the Pebble socket at the path it expects. The symlink and parent directory are created via Python (`pathlib.Path.mkdir` + `os.symlink`) because the charm runner image has no `mkdir` or `ln` in PATH.
+
+**Entrypoint**: The container runs `python -c 'import time; time.sleep(999999)'` — it stays alive doing nothing. Charm hooks are executed via `docker exec`.
+
+**Teardown**: The charm runner is removed *last* during model teardown, after postgres and workload containers. This ensures it is available for any cleanup hooks that might need it.
 
 ## execution contract
 
@@ -131,10 +141,10 @@ Exact sequence:
 2. `uv` prepares an environment with test dependencies and `jjx`
 3. `pytest` (via `jubilant`) invokes `juju ...` commands
 4. those commands execute `jjx` in that same `uv` environment
-5. for hook events, `jjx` launches `bubblewrap`
-6. inside `bubblewrap`, `jjx` runs `/charm/src/charm.py` using `sys.executable`
-7. `sys.executable` comes from the outer `uv` environment (no nested `uv run` per hook)
-8. hook tools execute `jjx` subcommands via that same `sys.executable`
+5. for hook events, `jjx` runs `docker exec` into the charm runner container
+6. inside the charm runner, `jjx` runs `/charm/src/charm.py` using the bind-mounted Python
+7. the Python interpreter is bind-mounted from the outer `uv` environment (no nested `uv run` per hook)
+8. hook tools are Python scripts (with a `#!/python/bin/python3.XX` shebang) that `import jjx` directly — they run as subprocesses of the charm process, inheriting its `PATH` and `PYTHONPATH`
 9. charm code interacts with hook tools and Pebble, then exits; `jjx` persists resulting state
 
 Deploy flow:
@@ -143,13 +153,12 @@ Deploy flow:
 2. stage runtime charm files in `./.jjx/charm/` (`src/`, `metadata.yaml`, `config.yaml`)
 3. start workload container and Pebble on Docker bridge networking (no host networking)
    - if `JJX_DOCKER_PUBLISH` is set to `HOST_PORT:CONTAINER_PORT`, add Docker publish `127.0.0.1:HOST_PORT:CONTAINER_PORT`
-4. bind host socket at `./.jjx/socket`
-5. resolve workload container IP
-6. set `JJX_CONTAINER_IP` in hook process environment from the resolved container IP
-7. write `./.jjx/sitecustomize.py` and prepend `./.jjx` to hook `PYTHONPATH`
-8. serve hook tools from `./.jjx/hook-tools`
-9. run charm hooks in `bubblewrap`
-10. persist resulting app and unit status
+4. start charm runner container (`--network=container:<workload>`, bind-mounts for Python, venv, jjx source, charm dir, state dir)
+5. create Pebble socket symlink inside charm runner (via Python, not `mkdir`/`ln`)
+6. wait for Pebble socket to be connectable inside charm runner
+7. generate hook tool scripts in `./.jjx/hook-tools/` (Python scripts with `#!/python/bin/python3.XX` shebangs)
+8. run charm hooks via `docker exec` into charm runner (passing `PATH` and `PYTHONPATH` via `docker exec -e`)
+9. persist resulting app and unit status
 
 Config flow:
 
@@ -159,9 +168,10 @@ Config flow:
 
 Destroy flow:
 
-1. stop container
-2. remove `./.jjx/socket`
-3. remove state
+1. stop and remove postgres containers (if any)
+2. stop and remove workload containers
+3. stop and remove charm runner containers (last)
+4. remove `./.jjx/` directory
 
 ## behavior guarantees
 
@@ -170,14 +180,13 @@ Destroy flow:
 - hook tools invoked as subprocess executables
 - synchronous event execution (no queue, no background agent)
 - deterministic single-unit semantics
-- charm code that connects to loopback addresses (`127.0.0.1`, `localhost`, `::1`) reaches the workload container without exposing container ports on the host
+- charm code that connects to loopback addresses (`127.0.0.1`, `localhost`, `::1`) reaches the workload container without exposing container ports on the host (the charm runner shares the workload's network namespace)
 
 ## constraints
 
 - requires Docker
 - requires Docker socket access from the calling shell (for example via docker group membership)
-- requires `bubblewrap`
-- requires Linux (Unix sockets + `bubblewrap` assumptions)
+- requires Linux (Unix sockets + Docker `--network=container:` assumptions)
 - assumes charm source is present in `./src`
 - assumes charm metadata files are present in project
 
@@ -187,7 +196,15 @@ State isolation rule:
 
 These constraints are deliberate. They keep the system small, predictable, and fast to debug.
 
-`bubblewrap` decision note: we considered dropping hook-process isolation because charm code is typically trusted in local development. We are keeping `bubblewrap` because it provides both filesystem fidelity (the charm sees `/charm` as a real directory matching real Juju, so charms that hardcode `/charm` paths work correctly) and filesystem isolation (preventing accidental host-side writes and hiding host-specific paths that could reduce test reproducibility across machines). The fidelity benefit cannot be replicated by Python-level interception alone, because `ops` writes state via `sqlite3` (a C module that bypasses Python file APIs) and charms may interact with the `/charm` filesystem directly. This remains a conscious tradeoff, not a permanent rule; we can revisit if operational simplicity becomes more valuable than the fidelity and isolation benefits.
+### why not bubblewrap
+
+An earlier design used `bubblewrap` (a Linux sandboxing tool) to provide filesystem isolation and fidelity for charm hook execution. We considered it because it bind-mounts the staged charm directory to `/charm`, matching real Juju's `JUJU_CHARM_DIR=/charm` convention, and gives the charm process a restricted filesystem view.
+
+We rejected it in favor of the charm runner container for three reasons:
+
+1. **Network fidelity**: `bubblewrap` is a filesystem sandbox, not a network proxy. It required a `sitecustomize.py` shim to rewrite outbound TCP connects from loopback addresses to the workload container's bridge IP. The charm runner's `--network=container:<workload>` shares the workload's network namespace directly, so loopback just works — no shim needed.
+2. **Operational complexity**: `bubblewrap` requires AppArmor configuration on some systems (notably GitHub Actions runners) to avoid permission errors. A Docker container has no such host-level configuration burden.
+3. **Consistency**: The charm runner is a Docker container, just like the workload and postgres containers. Using Docker for all containers simplifies the mental model and the teardown logic.
 
 ## design intent
 
