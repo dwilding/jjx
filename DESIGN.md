@@ -75,7 +75,7 @@ Currently supported:
 
 - `postgresql-k8s` — starts a real PostgreSQL 16 container in Docker and provides the `postgresql_client` interface. When a charm integrates with it, `jjx` populates the relation databag and creates a Juju secret with the database credentials, mimicking what the real `postgresql-k8s` charm's `DatabaseProvides` would write. The charm under test sees real relation data and real secrets, and can connect to the running PostgreSQL instance.
 
-Virtual charm containers are named `<model>-<app>-postgres` and are cleaned up on model teardown alongside workload containers.
+Virtual charm containers are named `<model>-<app>-postgres` and are cleaned up on model teardown alongside workload containers. They are removed first, before workload containers.
 
 ## runtime model
 
@@ -112,20 +112,22 @@ When the model is torn down, jjx removes the entire `./.jjx/` directory. The `~/
 
 The charm runner is a persistent Docker container that executes charm hooks.
 
-**Image**: `ubuntu/dotnet-deps:8.0-24.04_stable` — a chiseled Ubuntu image containing only the runtime libraries (glibc, libssl, libz, ca-certs) needed to run Python. No shell, no Python, no Pebble — everything is bind-mounted from the host.
+**Image**: `ubuntu/dotnet-deps:8.0-24.04_stable` — a chiseled Ubuntu image containing only the runtime libraries (glibc, libssl, libz, ca-certs) needed to run Python. No shell, no coreutils, no Python, no Pebble — everything is bind-mounted from the host. Because there is no `/bin/sh`, hook tool scripts use a direct Python shebang (`#!/python/bin/python3.XX`) rather than `#!/bin/sh`.
 
-**Naming**: `<container_name>-charm` (e.g. `jjx-default-myapp-charm`).
+**Naming**: `<model>-operator` (e.g. `jjx-default-operator`). Like the postgres container naming, this uses a fixed suffix with no app name.
 
 **Network**: The charm runner uses `--network=container:<workload>`, sharing the workload container's network namespace. This means charm code that connects to loopback addresses (`127.0.0.1`, `localhost`, `::1`) reaches the workload container directly.
 
 **Bind mounts** (all read-only unless noted):
 - Host Python (from `uv`) → `/python` (ro)
 - Host venv site-packages → `/venv` (ro)
-- jjx package source → `/jjx-src` (ro)
+- jjx package source → `/jjx-src` (ro) — the `jjx` package itself lives at `/jjx-src/src/jjx/`
 - `.jjx/charm/` → `/charm` (rw)
 - `.jjx/` → `/jjx` (rw)
 
-**Pebble socket**: A symlink is created inside the charm runner at `/charm/containers/<workload>/pebble.socket` → `/jjx/socket`, so `ops` can find the Pebble socket at the path it expects.
+**Environment**: The charm runner container is started with `PYTHONPATH` set to `/venv/lib/python3.XX/site-packages:/jjx-src/src:/charm/lib`. However, `docker exec` does not inherit environment variables from `docker run`, so `jjx` passes `PATH` and `PYTHONPATH` explicitly via `docker exec -e` for each hook execution. This ensures both the charm process and its hook tool subprocesses can find `jjx` and the hook tools.
+
+**Pebble socket**: A symlink is created inside the charm runner at `/charm/containers/<workload>/pebble.socket` → `/jjx/socket`, so `ops` can find the Pebble socket at the path it expects. The symlink and parent directory are created via Python (`pathlib.Path.mkdir` + `os.symlink`) because the charm runner image has no `mkdir` or `ln` in PATH.
 
 **Entrypoint**: The container runs `python -c 'import time; time.sleep(999999)'` — it stays alive doing nothing. Charm hooks are executed via `docker exec`.
 
@@ -142,7 +144,7 @@ Exact sequence:
 5. for hook events, `jjx` runs `docker exec` into the charm runner container
 6. inside the charm runner, `jjx` runs `/charm/src/charm.py` using the bind-mounted Python
 7. the Python interpreter is bind-mounted from the outer `uv` environment (no nested `uv run` per hook)
-8. hook tools execute `jjx` subcommands via that same Python interpreter
+8. hook tools are Python scripts (with a `#!/python/bin/python3.XX` shebang) that `import jjx` directly — they run as subprocesses of the charm process, inheriting its `PATH` and `PYTHONPATH`
 9. charm code interacts with hook tools and Pebble, then exits; `jjx` persists resulting state
 
 Deploy flow:
@@ -152,10 +154,10 @@ Deploy flow:
 3. start workload container and Pebble on Docker bridge networking (no host networking)
    - if `JJX_DOCKER_PUBLISH` is set to `HOST_PORT:CONTAINER_PORT`, add Docker publish `127.0.0.1:HOST_PORT:CONTAINER_PORT`
 4. start charm runner container (`--network=container:<workload>`, bind-mounts for Python, venv, jjx source, charm dir, state dir)
-5. create Pebble socket symlink inside charm runner
+5. create Pebble socket symlink inside charm runner (via Python, not `mkdir`/`ln`)
 6. wait for Pebble socket to be connectable inside charm runner
-7. serve hook tools from `./.jjx/hook-tools`
-8. run charm hooks via `docker exec` into charm runner
+7. generate hook tool scripts in `./.jjx/hook-tools/` (Python scripts with `#!/python/bin/python3.XX` shebangs)
+8. run charm hooks via `docker exec` into charm runner (passing `PATH` and `PYTHONPATH` via `docker exec -e`)
 9. persist resulting app and unit status
 
 Config flow:

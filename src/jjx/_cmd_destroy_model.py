@@ -31,20 +31,21 @@ def destroy_model(args: list[str]) -> int:
     # else is torn down.
     charm_runner_names: list[str] = []
     workload_names: list[str] = []
+    postgres_names: list[str] = []
     for app_state in model_state.get("apps", {}).values():
         charm_runner_name = app_state.get("charm_runner_name")
         if charm_runner_name:
             charm_runner_names.append(charm_runner_name)
         container_name = app_state.get("container_name")
-        if container_name:
+        if not container_name:
+            continue
+        if app_state.get("virtual"):
+            postgres_names.append(container_name)
+        else:
             workload_names.append(container_name)
 
-    # Remove postgres containers first (non-charm, non-workload).
-    for container_name in _engine._docker_list_model_containers(model_name):
-        if container_name.endswith("-charm"):
-            continue
-        if container_name in workload_names:
-            continue
+    # Remove postgres containers first.
+    for container_name in postgres_names:
         _engine._docker_rm(container_name)
 
     # Remove workload containers.

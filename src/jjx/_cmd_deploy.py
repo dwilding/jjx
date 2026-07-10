@@ -196,7 +196,7 @@ def deploy(args: list[str], model: str | None) -> int:
     # Start the charm runner container — a persistent container that shares
     # the workload's network namespace and runs charm hooks via docker exec.
     _engine._ensure_charm_runner_image()
-    _engine._start_charm_runner(container_name, model_state["apps"][app_name])
+    _engine._start_charm_runner(model_name, container_name, model_state["apps"][app_name])
     _engine._save_state(state)
 
     charm_runner_name = model_state["apps"][app_name].get("charm_runner_name", "")
