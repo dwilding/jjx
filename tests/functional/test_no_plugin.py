@@ -5,7 +5,6 @@ PACKAGE_DIR = pathlib.Path(__file__).parent.parent.parent
 
 
 def test_pass_without_plugin(k8s_1_minimal_patched):
-    charm_dir = k8s_1_minimal_patched
     command = [
         "uv",
         "remove",
@@ -15,10 +14,10 @@ def test_pass_without_plugin(k8s_1_minimal_patched):
     ]
     subprocess.run(
         command,
-        cwd=charm_dir,
+        cwd=k8s_1_minimal_patched,
         check=True,
     )
-    (charm_dir / "tests" / "integration" / "conftest.py").write_text(
+    (k8s_1_minimal_patched / "tests" / "integration" / "conftest.py").write_text(
         "import pathlib\n"
         "\n"
         "import pytest\n"
@@ -35,9 +34,9 @@ def test_pass_without_plugin(k8s_1_minimal_patched):
         "    with jubilant.temp_model() as juju:\n"
         "        yield juju\n"
     )
-    test_charm = charm_dir / "tests" / "integration" / "test_charm.py"
+    test_charm = k8s_1_minimal_patched / "tests" / "integration" / "test_charm.py"
     test_charm.write_text(test_charm.read_text().replace("@pytest.mark.juju_setup\n", ""))
-    (charm_dir / "placeholder.charm").touch()
+    (k8s_1_minimal_patched / "placeholder.charm").touch()
     command = [
         "uv",
         "run",
@@ -50,14 +49,15 @@ def test_pass_without_plugin(k8s_1_minimal_patched):
     ]
     subprocess.run(
         command,
-        cwd=charm_dir,
+        cwd=k8s_1_minimal_patched,
         check=True,
     )
-    assert not (charm_dir / ".jjx").exists()
+    assert not (k8s_1_minimal_patched / ".jjx").exists()
+    assert (k8s_1_minimal_patched / "placeholder.charm").exists()
+    (k8s_1_minimal_patched / "placeholder.charm").unlink()
 
 
 def test_jjx_cli_needs_plugin(k8s_1_minimal_patched):
-    charm_dir = k8s_1_minimal_patched
     command = [
         "uvx",
         "--with-editable",
@@ -66,9 +66,11 @@ def test_jjx_cli_needs_plugin(k8s_1_minimal_patched):
     ]
     result = subprocess.run(
         command,
-        cwd=charm_dir,
+        cwd=k8s_1_minimal_patched,
         capture_output=True,
         text=True,
     )
     assert result.returncode == 1
     assert "pytest-jubilant is not in the 'integration' dependency group" in result.stderr
+    assert not (k8s_1_minimal_patched / ".jjx").exists()
+    assert not (k8s_1_minimal_patched / "placeholder.charm").exists()
