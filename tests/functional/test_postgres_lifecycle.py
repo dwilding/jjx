@@ -26,8 +26,8 @@ def assert_no_container(container_name: str) -> None:
     ]
     result = subprocess.run(
         command,
-        text=True,
         capture_output=True,
+        text=True,
     )
     assert result.returncode == 1
 

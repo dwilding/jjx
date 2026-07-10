@@ -26,7 +26,9 @@ def assert_one_process() -> None:
         capture_output=True,
         text=True,
     )
-    assert result.returncode == 0
+    assert result.returncode == 0, (
+        f"docker exec exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    )
     assert result.stdout.count("uvicorn") == 1
 
 
@@ -110,10 +112,12 @@ def test_server_changes_port(k8s_2_configurable):
     result = subprocess.run(
         command,
         cwd=k8s_2_configurable,
-        text=True,
         capture_output=True,
+        text=True,
     )
-    assert result.returncode == 0
+    assert result.returncode == 0, (
+        f"juju config exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    )
     port = int(result.stdout.strip())
     assert_server_state(port, True)
     # Bump the port.
@@ -158,7 +162,7 @@ def test_teardown_container(k8s_2_configurable):
     ]
     result = subprocess.run(
         command,
-        text=True,
         capture_output=True,
+        text=True,
     )
     assert result.returncode == 1
