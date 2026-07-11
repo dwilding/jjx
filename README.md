@@ -1,20 +1,20 @@
 # jjx — Spin up K8s charms on Docker
 
-jjx an **experimental** test adapter for [Juju charms](https://canonical.com/juju/charms-architecture). It lets you run a Kubernetes charm's workload as a Docker container, with the charm's integration tests acting like a Compose file.
+jjx is an **experimental** test adapter for [Juju charms](https://canonical.com/juju/charms-architecture). It lets you run a charm's workload as a Docker container, with the charm's integration tests acting like a Compose file.
 
 IMAGE TODO
 
-To be compatible with jjx, a charm must use uv to manage its dependencies and have a dependency group called `integration`. jjx expects the integration tests to be located at `tests/integration` and use Jubilant with pytest-jubilant. For more detail about the expected structure, see [How to write integration tests for a charm](https://canonical.com/juju/docs/ops/latest/howto/write-integration-tests-for-a-charm/#write-your-tests).
+To be compatible with jjx, a K8s charm must use uv to manage its dependencies and have a dependency group called `integration`. jjx expects the integration tests to be located at `tests/integration` and use Jubilant with pytest-jubilant. For more detail about the expected structure, see [How to write integration tests for a charm](https://canonical.com/juju/docs/ops/latest/howto/write-integration-tests-for-a-charm/#write-your-tests).
 
 **What's the point of jjx?**
 
 *Speed* 💨
 
-You can use jjx to quickly "run" a K8s charm and play with its workload. No need to pack the charm or set up Juju.
+You can use jjx to quickly "run" a charm and play with its workload. No need to pack the charm or set up Juju.
 
 **And what's the catch?**
 
-The charm can't be too complex. If it requires storage, multiple units, or other charms, jjx might not work. I'm deliberately leaving the limitations vague while jjx is a v0 tool.
+The charm can't be too complex. If it requires storage, multiple units, or other charms, jjx might not work. The limitations are deliberately vague while jjx is a v0 tool.
 
 ## Demo
 
@@ -44,7 +44,7 @@ TODO - `docker ps`
 
 - **[Docker](https://docs.docker.com/engine/install/)** — To install on Ubuntu, run `sudo snap install docker`.
 
-    By default, Docker commands require `sudo`, but jjx runs Docker commands as a regular user. Run `sudo usermod -aG docker $USER`, then log out and log back in again.
+    By default, Docker commands require `sudo`, but jjx runs Docker commands as a regular user. To allow Docker commands, run `sudo usermod -aG docker $USER`, then log out and log back in again.
 
 ## Usage
 
