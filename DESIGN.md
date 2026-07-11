@@ -41,11 +41,17 @@ uv run --group integration --with jjx pytest <args>
 uv run --group integration --with jjx pytest tests/integration --no-juju-teardown [<pytest-extra-args>]
 ```
 
-Internally, `jjx` may substitute `--with jjx` with `--python <venv>` or `--with-editable <path>` depending on how it was invoked (e.g. running from inside the charm's venv or from a local checkout). The user-facing equivalent is always `--with jjx`.
+Internally, `jjx` chooses how to make itself available to the inner `uv run` based on how it was launched:
+
+- **Charm venv** (user added `jjx` to their charm's dependencies): `--python <venv>` — pin uv to the current interpreter so the charm's existing venv (which already has `jjx`) is reused.
+- **Local checkout** (developer running `uvx --with-editable <repo> jjx`): `--with-editable <path>` — install the same source into the inner venv.
+- **Tool install** (user ran `uv tool install jjx`): no injection — the `juju` shim is already on `PATH` with a hardcoded shebang pointing at the tool's Python, which has the correct `jjx`. The inner `uv run` only needs the charm's integration dependencies.
+
+The user-facing equivalent is always `--with jjx`.
 
 The test fixture only needs a `.charm` file to exist; `jjx` creates one automatically before running pytest and removes it afterwards. `jjx` treats it as a deploy trigger and does not unpack it.
 
-No project dependency changes are required. `jjx` injects itself and assumes the project already provides its normal test dependencies.
+No project dependency changes are required. `jjx` injects itself (or relies on the tool-installed `juju` shim) and assumes the project already provides its normal test dependencies.
 
 ## scope
 
