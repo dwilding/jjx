@@ -121,11 +121,11 @@ The charm runner is a persistent Docker container that executes charm hooks.
 **Bind mounts** (all read-only unless noted):
 - Host Python (from `uv`) → `/python` (ro)
 - Host venv site-packages → `/venv` (ro)
-- jjx package source → `/jjx-src` (ro) — the `jjx` package itself lives at `/jjx-src/src/jjx/`
+- jjx package source → `/jjx-src` (ro) — the parent of the `jjx` package directory, so `import jjx` works for both dev checkouts (`<repo>/src`) and installed tools (`site-packages`)
 - `.jjx/charm/` → `/charm` (rw)
 - `.jjx/` → `/jjx` (rw)
 
-**Environment**: The charm runner container is started with `PYTHONPATH` set to `/venv/lib/python3.XX/site-packages:/jjx-src/src:/charm/lib`. However, `docker exec` does not inherit environment variables from `docker run`, so `jjx` passes `PATH` and `PYTHONPATH` explicitly via `docker exec -e` for each hook execution. This ensures both the charm process and its hook tool subprocesses can find `jjx` and the hook tools.
+**Environment**: The charm runner container is started with `PYTHONPATH` set to `/venv/lib/python3.XX/site-packages:/jjx-src:/charm/lib`. However, `docker exec` does not inherit environment variables from `docker run`, so `jjx` passes `PATH` and `PYTHONPATH` explicitly via `docker exec -e` for each hook execution. This ensures both the charm process and its hook tool subprocesses can find `jjx` and the hook tools.
 
 **Pebble socket**: A symlink is created inside the charm runner at `/charm/containers/<workload>/pebble.socket` → `/jjx/socket`, so `ops` can find the Pebble socket at the path it expects. The symlink and parent directory are created via Python (`pathlib.Path.mkdir` + `os.symlink`) because the charm runner image has no `mkdir` or `ln` in PATH.
 

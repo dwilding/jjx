@@ -567,7 +567,11 @@ def _start_charm_runner(
     project_root = _project_root()
     jjx_dir = _jjx_dir()
     venv_dir = project_root / ".venv"
-    package_root = Path(__file__).resolve().parents[2]
+    # Parent of the jjx package directory. In a dev checkout this is
+    # <repo>/src; when installed as a uv tool this is site-packages.
+    # Either way, mounting it at /jjx-src and adding /jjx-src to PYTHONPATH
+    # makes `import jjx` work inside the charm runner container.
+    package_root = Path(__file__).resolve().parents[1]
 
     workload = app_state.get("workload", "")
     if not isinstance(workload, str) or not workload:
@@ -587,8 +591,9 @@ def _start_charm_runner(
     pythonpath_parts = []
     if venv_site_packages:
         pythonpath_parts.append(f"/venv/lib/{venv_site_packages}")
-    # /jjx-src is the project root; the jjx package is under src/jjx.
-    pythonpath_parts.append("/jjx-src/src")
+    # /jjx-src is the parent of the jjx package directory, so `import jjx`
+    # works for both dev checkouts and installed tools.
+    pythonpath_parts.append("/jjx-src")
     pythonpath_parts.append("/charm/lib")
     container_pythonpath = ":".join(pythonpath_parts)
 
