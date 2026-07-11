@@ -104,7 +104,26 @@ def teardown_all_models() -> None:
 
 
 def jjx_pytest_env_args(charm_root: Path) -> list[str]:
-    """Return uv-run args that keep jjx resolution consistent with launch mode."""
+    """Return uv-run args that keep jjx resolution consistent with launch mode.
+
+    Three launch modes are supported:
+
+    1. **Charm venv** — the user added ``jjx`` to their charm's dependencies and
+       runs ``uv run jjx``.  The ``juju`` shim lives in the charm's ``.venv/bin``
+       with a shebang pointing at the charm venv Python.  Pin uv to that
+       interpreter so the inner ``uv run`` reuses the same venv.
+
+    2. **Local checkout** — the developer runs ``uvx --with-editable <repo> jjx``
+       (or ``uv tool install <repo>`` from a local path).  The ``jjx`` package
+       is importable from a directory whose parent contains ``pyproject.toml``.
+       Use ``--with-editable`` so the inner ``uv run`` installs the same source.
+
+    3. **Tool install** — the user ran ``uv tool install jjx`` from PyPI (or
+       ``git+<url>``).  The ``juju`` shim is on ``PATH`` with a hardcoded shebang
+       pointing at the tool's own Python, which already has the correct ``jjx``.
+       No injection is needed — the inner ``uv run`` only needs the charm's
+       integration dependencies.
+    """
     charm_venv_dir = (charm_root / ".venv").absolute()
     current_python = Path(sys.executable).absolute()
 
@@ -114,12 +133,13 @@ def jjx_pytest_env_args(charm_root: Path) -> list[str]:
 
     package_root = Path(__file__).resolve().parents[2]
 
-    # Case 2: running from a local checkout/tool workflow; use editable source.
+    # Case 2: running from a local checkout; use editable source.
     if (package_root / "pyproject.toml").exists():
         return ["--with-editable", str(package_root)]
 
-    # Case 3: fallback when no local checkout is available.
-    return ["--with", "jjx"]
+    # Case 3: installed as a tool (PyPI or git).  The `juju` shim is already on
+    # PATH with a shebang pointing at a Python that has jjx — no injection needed.
+    return []
 
 
 def jjx_pytest_args(charm_root: Path) -> list[str]:

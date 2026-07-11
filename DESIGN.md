@@ -27,25 +27,19 @@ Additional pytest arguments can be appended to `jjx`'s built-in defaults in the 
 pytest-extra-args = ["-v", "-k", "test_deploy"]
 ```
 
-`jjx` always controls the test directory and teardown behavior; `pytest-extra-args` are appended after the built-in defaults. For full control, use `uv run` directly:
-
-```
-uv run --group integration --with jjx pytest <args>
-```
+`jjx` always controls the test directory and teardown behavior; `pytest-extra-args` are appended after the built-in defaults. For full control, use `uv run` directly (see launch modes below).
 
 ## under the hood
 
-`jjx` invokes pytest via:
+`jjx` invokes pytest via `uv run --group integration pytest tests/integration --no-juju-teardown [<pytest-extra-args>]`. How `jjx` makes itself available to the inner `uv run` depends on how it was launched:
 
-```
-uv run --group integration --with jjx pytest tests/integration --no-juju-teardown [<pytest-extra-args>]
-```
-
-Internally, `jjx` may substitute `--with jjx` with `--python <venv>` or `--with-editable <path>` depending on how it was invoked (e.g. running from inside the charm's venv or from a local checkout). The user-facing equivalent is always `--with jjx`.
+- **Charm venv** (user added `jjx` to their charm's dependencies and runs `uv run jjx`): `--python <venv>` — pin uv to the current interpreter so the charm's existing venv (which already has `jjx`) is reused.
+- **Local checkout** (developer running `uvx --with-editable <repo> jjx`): `--with-editable <path>` — install the same source into the inner venv.
+- **Tool install** (user ran `uv tool install jjx`): no injection — the `juju` shim is already on `PATH` with a hardcoded shebang pointing at the tool's Python, which has the correct `jjx`. The inner `uv run` only needs the charm's integration dependencies.
 
 The test fixture only needs a `.charm` file to exist; `jjx` creates one automatically before running pytest and removes it afterwards. `jjx` treats it as a deploy trigger and does not unpack it.
 
-No project dependency changes are required. `jjx` injects itself and assumes the project already provides its normal test dependencies.
+No project dependency changes are required. `jjx` injects itself (or relies on the tool-installed `juju` shim) and assumes the project already provides its normal test dependencies.
 
 ## scope
 
@@ -137,15 +131,16 @@ The charm runner is a persistent Docker container that executes charm hooks.
 
 Exact sequence:
 
-1. user runs `uv run --group integration --with jjx pytest -v tests/integration`
-2. `uv` prepares an environment with test dependencies and `jjx`
-3. `pytest` (via `jubilant`) invokes `juju ...` commands
-4. those commands execute `jjx` in that same `uv` environment
-5. for hook events, `jjx` runs `docker exec` into the charm runner container
-6. inside the charm runner, `jjx` runs `/charm/src/charm.py` using the bind-mounted Python
-7. the Python interpreter is bind-mounted from the outer `uv` environment (no nested `uv run` per hook)
-8. hook tools are Python scripts (with a `#!/python/bin/python3.XX` shebang) that `import jjx` directly — they run as subprocesses of the charm process, inheriting its `PATH` and `PYTHONPATH`
-9. charm code interacts with hook tools and Pebble, then exits; `jjx` persists resulting state
+1. user runs `jjx` (or `uv run jjx` if jjx is a charm dependency)
+2. `jjx` invokes `uv run --group integration pytest tests/integration --no-juju-teardown` (with launch-mode-appropriate args to make `juju` available — see "under the hood")
+3. `uv` prepares an environment with the charm's test dependencies
+4. `pytest` (via `jubilant`) invokes `juju ...` commands
+5. those commands execute `jjx`'s `juju` shim (from the charm venv, the inner venv, or the tool install, depending on launch mode)
+6. for hook events, `jjx` runs `docker exec` into the charm runner container
+7. inside the charm runner, `jjx` runs `/charm/src/charm.py` using the bind-mounted Python
+8. the Python interpreter is bind-mounted from the outer `uv` environment (no nested `uv run` per hook)
+9. hook tools are Python scripts (with a `#!/python/bin/python3.XX` shebang) that `import jjx` directly — they run as subprocesses of the charm process, inheriting its `PATH` and `PYTHONPATH`
+10. charm code interacts with hook tools and Pebble, then exits; `jjx` persists resulting state
 
 Deploy flow:
 
