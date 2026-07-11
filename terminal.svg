@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 790 200" font-family="'Segoe UI','Helvetica Neue',Arial,sans-serif">
+  <defs>
+    <linearGradient id="term" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#2E0A23"/>
+      <stop offset="100%" stop-color="#220720"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Terminal fills the entire image -->
+  <rect width="790" height="200" rx="8" fill="url(#term)" stroke="#4A1535" stroke-width="1"/>
+
+  <!-- Slim header bar -->
+  <path d="M 0 8 Q 0 0 8 0 L 782 0 Q 790 0 790 8 L 790 26 L 0 26 Z" fill="#380C2B"/>
+  <line x1="0" y1="26" x2="790" y2="26" stroke="#4A1535" stroke-width="1"/>
+
+  <!-- Terminal output -->
+  <g font-family="'JetBrains Mono','Fira Code','Cascadia Code',Consolas,monospace" font-size="14">
+    <text x="24" y="56" fill="#3FB950">================================== 2 passed in 19.13s ==================================</text>
+    <text x="24" y="96" fill="#E8E8E8">Started workload container jubilant-05268086-test-charm-fastapi-demo with IP 172.17.0.2</text>
+    <text x="24" y="136" fill="#E8E8E8">Press Ctrl-C to tear down</text>
+    <!-- Static caret -->
+    <rect x="24" y="140" width="9" height="16" rx="1" fill="#E8E8E8"/>
+  </g>
+</svg>

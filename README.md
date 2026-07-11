@@ -2,7 +2,7 @@
 
 jjx is an **experimental** test adapter for [Juju charms](https://canonical.com/juju/charms-architecture). It lets you run a charm's workload as a Docker container, with the charm's integration tests acting like a Compose file.
 
-IMAGE TODO
+![jjx terminal demo](terminal.svg)
 
 To be compatible with jjx, a K8s charm must use uv to manage its dependencies and have a dependency group called `integration`. jjx expects the integration tests to be located at `tests/integration` and use Jubilant with pytest-jubilant. For more detail about the expected structure, see [How to write integration tests for a charm](https://canonical.com/juju/docs/ops/latest/howto/write-integration-tests-for-a-charm/#write-your-tests).
 
@@ -31,9 +31,9 @@ uvx jjx -p 5000:8000
 Then play with the workload (in a second terminal):
 
 ```sh
-curl localhost:5000/names  # returns {}
+curl localhost:5000/names  # returns {"names":{}}
 curl -X POST -d 'name=elephant' localhost:5000/addname/
-curl localhost:5000/names  # returns {"names": {"1": "elephant"}}
+curl localhost:5000/names  # returns {"names":{"1":"elephant"}}
 ```
 
 TODO - `docker ps`
@@ -58,9 +58,9 @@ uvx jjx
 
 This runs the charm's integration tests and starts a Docker container for the workload — assuming the integration tests try to deploy a `.charm` file along with a workload image. See [How jjx works](#how-jjx-works).
 
-The workload container stays running until you press Ctrl-C.
+The workload stays running until you press Ctrl-C.
 
-The command output includes the IP address of the workload container. You can play with the workload by connecting to this address.
+The command output includes the IP address of the workload. You can play with the workload by connecting to this address.
 
 Alternatively, to play with the workload on localhost, specify a port mapping:
 
@@ -76,9 +76,9 @@ In the charm dir:
 uvx jjx -d
 ```
 
-This does the same thing as `uvx jjx`, except the command exits and the workload container stays running.
+This does the same thing as `uvx jjx`, except the command exits and the workload stays running.
 
-To stop the workload container:
+To stop the workload:
 
 ```text
 uvx jjx down
@@ -94,9 +94,9 @@ uv run --group integration --with jjx pytest tests/integration --no-juju-teardow
 rm placeholder.charm
 ```
 
-When the integration tests try to deploy a `.charm` file along with a workload image, `juju` starts a container for the charm code and a container for the workload. `juju` also injects Pebble into the workload container and makes sure the charm code has access to the Pebble socket (as expected by Ops).
+When the integration tests try to deploy a `.charm` file along with a workload image, `juju` starts a container for the charm code. `juju` also starts a container for the workload and injects Pebble into the container. The charm code has access to the Pebble socket, as expected by Ops.
 
-Other Jubilant methods are handled by `juju` and routed to the charm code. For example, if an integration test calls `Juju.config()`, `juju` executes the charm code with its environment configured as a config-changed event. Ops recognises the event (as normal) and the charm code is able to enact the change using Pebble methods (again, as normal).
+Other Jubilant methods are handled by `juju` and routed to the charm code. For example, if an integration test calls `Juju.config()`, `juju` executes the charm code with its environment configured as a config-changed event. Ops recognises the event and the charm code is able to enact the change using Pebble methods.
 
 If the integration tests try to deploy [postgresql-k8s](https://charmhub.io/postgresql-k8s), `juju` starts a container for the official [postgres](https://hub.docker.com/_/postgres) image and mocks the behavior of charmed PostgreSQL K8s. Once integrated with "postgresql-k8s", the charm code thinks it's talking to a real remote unit.
 
