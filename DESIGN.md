@@ -27,11 +27,23 @@ Additional pytest arguments can be appended to `jjx`'s built-in defaults in the 
 pytest-extra-args = ["-v", "-k", "test_deploy"]
 ```
 
-`jjx` always controls the test directory and teardown behavior; `pytest-extra-args` are appended after the built-in defaults. For full control, use `uv run` directly (see launch modes below).
+Extra pytest arguments can also be passed on the command line after `--`:
+
+```
+jjx -d -- -vv -k test_deploy
+```
+
+Arguments are assembled in this order:
+
+1. `jjx`'s built-in defaults (`tests/integration --no-juju-teardown`)
+2. `pytest-extra-args` from `pyproject.toml`
+3. extra args from the command line (after `--`)
+
+Command-line args come last so they take precedence over `pyproject.toml` — matching the convention that command-line options override configuration file defaults. `jjx` always controls the test directory and teardown behavior; both `pytest-extra-args` and CLI args are appended after the built-in defaults. For full control, use `uv run` directly (see launch modes below).
 
 ## under the hood
 
-`jjx` invokes pytest via `uv run --group integration pytest tests/integration --no-juju-teardown [<pytest-extra-args>]`. How `jjx` makes itself available to the inner `uv run` depends on how it was launched:
+`jjx` invokes pytest via `uv run --group integration pytest tests/integration --no-juju-teardown [<pytest-extra-args>] [<cli-extra-args>]`. How `jjx` makes itself available to the inner `uv run` depends on how it was launched:
 
 - **Charm venv** (user added `jjx` to their charm's dependencies and runs `uv run jjx`): `--python <venv>` — pin uv to the current interpreter so the charm's existing venv (which already has `jjx`) is reused.
 - **Local checkout** (developer running `uvx --with-editable <repo> jjx`): `--with-editable <path>` — install the same source into the inner venv.
