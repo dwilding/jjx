@@ -484,10 +484,17 @@ def _docker_list_model_containers(model_name: str) -> list[str]:
 
 
 def _resolve_uv_python() -> Path:
-    """Follow the charm's ``.venv/bin/python`` symlink to find the uv-managed Python directory.
+    """Find a uv-managed Python installation to bind-mount into the charm runner.
 
-    Returns the directory containing the real Python installation (e.g.
-    ``~/.local/share/uv/python/cpython-3.14.0-linux-x86_64-gnu``).
+    The charm runner container is a minimal image with no Python — the
+    interpreter is bind-mounted from the host.  This requires a standalone
+    Python *directory* (not a single binary), which is why we need a
+    uv-managed Python (e.g. ``~/.local/share/uv/python/cpython-3.14.0-…``).
+
+    If the charm's ``.venv/bin/python`` already points to a uv-managed
+    Python, that directory is returned directly.  Otherwise (e.g. the venv
+    uses system Python), we ask ``uv python find`` for a uv-managed Python
+    matching the venv's version, downloading one if necessary.
     """
     venv_python = _project_venv_python()
     if venv_python is None:
@@ -496,9 +503,99 @@ def _resolve_uv_python() -> Path:
     # uv Python is at ~/.local/share/uv/python/cpython-3.X.Y-.../bin/python3.X
     # The directory we want to bind-mount is the cpython-3.X.Y-... directory.
     python_dir = real_python.parent.parent
+    if "cpython" in python_dir.name and "uv" in str(python_dir):
+        return python_dir
+    # The venv's Python is not uv-managed (e.g. system Python on a CI runner).
+    # Use ``uv python find`` to locate (or download) a uv-managed Python with
+    # the same major.minor version, so we have a standalone directory to
+    # bind-mount into the charm runner container.
+    version = _python_version(real_python)
+    return _find_uv_python(version)
+
+
+def _python_version(python_binary: Path) -> str:
+    """Return the ``major.minor`` version of *python_binary* (e.g. ``3.12``)."""
+    proc = subprocess.run(
+        [
+            str(python_binary),
+            "-c",
+            "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        raise CliError(
+            f"could not determine Python version of {python_binary}: {proc.stderr.strip()}"
+        )
+    version = proc.stdout.strip()
+    if not re.fullmatch(r"\d+\.\d+", version):
+        raise CliError(f"unexpected Python version output from {python_binary}: {version!r}")
+    return version
+
+
+def _find_uv_python(version: str) -> Path:
+    """Use ``uv python find`` to locate a uv-managed Python for *version*.
+
+    If no managed Python is installed, ``uv python install`` is called to
+    download one, then the lookup is retried.
+    """
+    uv_binary = shutil.which("uv")
+    if uv_binary is None:
+        raise CliError(
+            "charm Python is not uv-managed and uv is not on PATH; "
+            "install uv or use a uv-managed Python"
+        )
+    # Clear VIRTUAL_ENV and UV_PYTHON so that ``uv python find`` doesn't
+    # pick up the active venv or the UV_PYTHON override (which may point to
+    # system Python) — we want a uv-managed Python specifically.
+    clean_env = {k: v for k, v in os.environ.items() if k not in ("VIRTUAL_ENV", "UV_PYTHON")}
+    try:
+        proc = subprocess.run(
+            [uv_binary, "python", "find", "--no-project", "--managed-python", version],
+            capture_output=True,
+            text=True,
+            check=True,
+            env=clean_env,
+        )
+    except subprocess.CalledProcessError:
+        # No uv-managed Python for this version is installed.  Download one
+        # and retry the lookup.
+        print(
+            f"No uv-managed Python {version} found; downloading one...",
+            flush=True,
+        )
+        try:
+            subprocess.run(
+                [uv_binary, "python", "install", version],
+                capture_output=True,
+                text=True,
+                check=True,
+                env=clean_env,
+            )
+        except subprocess.CalledProcessError as install_exc:
+            raise CliError(
+                f"could not find or install a uv-managed Python {version}: "
+                f"{install_exc.stderr.strip() or install_exc.stdout.strip()}"
+            ) from None
+        try:
+            proc = subprocess.run(
+                [uv_binary, "python", "find", "--no-project", "--managed-python", version],
+                capture_output=True,
+                text=True,
+                check=True,
+                env=clean_env,
+            )
+        except subprocess.CalledProcessError as exc:
+            raise CliError(
+                f"could not find a uv-managed Python {version} after install: "
+                f"{exc.stderr.strip() or exc.stdout.strip()}"
+            ) from None
+    managed_python = Path(proc.stdout.strip()).resolve()
+    python_dir = managed_python.parent.parent
     if "cpython" not in python_dir.name or "uv" not in str(python_dir):
         raise CliError(
-            f"charm Python is not uv-managed ({real_python}); "
+            f"uv python find returned an unexpected path ({managed_python}); "
             "jjx currently requires uv-managed Python"
         )
     return python_dir

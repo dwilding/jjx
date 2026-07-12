@@ -34,7 +34,12 @@ jobs:
         working-directory: operator/examples/httpbin-demo
         run: uvx --with git+https://github.com/dwilding/jjx@main jjx down
       - name: Check no workload
-        run: ! curl --fail --max-time 2 http://localhost:8000/
+        run: |
+          if curl --fail --max-time 2 http://localhost:8000/; then
+            echo "ERROR: workload is still running after jjx down"
+            exit 1
+          fi
+          echo "Workload is down (expected)"
 
   e2e-tool-pytest:
     runs-on: ubuntu-latest
@@ -80,7 +85,12 @@ jobs:
         working-directory: operator/examples/httpbin-demo
         run: uv run jjx down
       - name: Check no workload
-        run: ! curl --fail --max-time 2 http://localhost:8000/
+        run: |
+          if curl --fail --max-time 2 http://localhost:8000/; then
+            echo "ERROR: workload is still running after jjx down"
+            exit 1
+          fi
+          echo "Workload is down (expected)"
 
   e2e-dep-pytest:
     runs-on: ubuntu-latest
