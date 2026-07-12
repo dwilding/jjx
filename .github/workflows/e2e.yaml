@@ -1,7 +1,6 @@
 name: End-to-end tests
 
 on:
-  pull_request:
   push:
     branches:
       - main
@@ -28,12 +27,12 @@ jobs:
           path: operator
       - name: Run httpbin-demo
         working-directory: operator/examples/httpbin-demo
-        run: uvx --with git+https://github.com/dwilding/jjx@e2e-httpbin-errors jjx -d -p 8000:80 -- -vv
+        run: uvx --with git+https://github.com/dwilding/jjx@main jjx -d -p 8000:80 -- -vv
       - name: Check workload
         run: curl --fail http://localhost:8000/
       - name: Tear down
         working-directory: operator/examples/httpbin-demo
-        run: uvx --with git+https://github.com/dwilding/jjx@e2e-httpbin-errors jjx down
+        run: uvx --with git+https://github.com/dwilding/jjx@main jjx down
       - name: Check no workload
         run: |
           if curl --fail --max-time 2 http://localhost:8000/; then
@@ -59,7 +58,7 @@ jobs:
         working-directory: operator/examples/httpbin-demo
         run: |
           touch placeholder.charm
-          uv run --group integration --with git+https://github.com/dwilding/jjx@e2e-httpbin-errors pytest tests/integration
+          uv run --group integration --with git+https://github.com/dwilding/jjx@main pytest tests/integration
 
   e2e-dep-cli:
     runs-on: ubuntu-latest
@@ -76,7 +75,7 @@ jobs:
           path: operator
       - name: Add jjx to httpbin-demo
         working-directory: operator/examples/httpbin-demo
-        run: uv add --group integration "jjx @ git+https://github.com/dwilding/jjx@e2e-httpbin-errors"
+        run: uv add --group integration "jjx @ git+https://github.com/dwilding/jjx@main"
       - name: Run httpbin-demo
         working-directory: operator/examples/httpbin-demo
         run: uv run jjx -d -p 8000:80 -- -vv
@@ -108,7 +107,7 @@ jobs:
           path: operator
       - name: Add jjx to httpbin-demo
         working-directory: operator/examples/httpbin-demo
-        run: uv add --group integration "jjx @ git+https://github.com/dwilding/jjx@e2e-httpbin-errors"
+        run: uv add --group integration "jjx @ git+https://github.com/dwilding/jjx@main"
       - name: Test httpbin-demo
         working-directory: operator/examples/httpbin-demo
         run: |
