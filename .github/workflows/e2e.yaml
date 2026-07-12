@@ -51,7 +51,9 @@ jobs:
           path: operator
       - name: Test httpbin-demo
         working-directory: operator/examples/httpbin-demo
-        run: uv run --group integration --with https://github.com/dwilding/jjx@main pytest tests/integration
+        run: |
+          touch placeholder.charm
+          uv run --group integration --with https://github.com/dwilding/jjx@main pytest tests/integration
 
   e2e-dep-cli:
     runs-on: ubuntu-latest
@@ -98,4 +100,6 @@ jobs:
         run: uv add --group integration "jjx @ https://github.com/dwilding/jjx@main"
       - name: Test httpbin-demo
         working-directory: operator/examples/httpbin-demo
-        run: uv run --group integration pytest tests/integration
+        run: |
+          touch placeholder.charm
+          uv run --group integration pytest tests/integration
