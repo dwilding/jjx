@@ -537,8 +537,8 @@ def _python_version(python_binary: Path) -> str:
 def _find_uv_python(version: str) -> Path:
     """Use ``uv python find`` to locate a uv-managed Python for *version*.
 
-    If no managed Python is installed, ``uv`` will download one
-    automatically.
+    If no managed Python is installed, ``uv python install`` is called to
+    download one, then the lookup is retried.
     """
     uv_binary = shutil.which("uv")
     if uv_binary is None:
@@ -558,11 +558,39 @@ def _find_uv_python(version: str) -> Path:
             check=True,
             env=clean_env,
         )
-    except subprocess.CalledProcessError as exc:
-        raise CliError(
-            f"could not find a uv-managed Python {version}: "
-            f"{exc.stderr.strip() or exc.stdout.strip()}"
-        ) from None
+    except subprocess.CalledProcessError:
+        # No uv-managed Python for this version is installed.  Download one
+        # and retry the lookup.
+        print(
+            f"No uv-managed Python {version} found; downloading one...",
+            flush=True,
+        )
+        try:
+            subprocess.run(
+                [uv_binary, "python", "install", version],
+                capture_output=True,
+                text=True,
+                check=True,
+                env=clean_env,
+            )
+        except subprocess.CalledProcessError as install_exc:
+            raise CliError(
+                f"could not find or install a uv-managed Python {version}: "
+                f"{install_exc.stderr.strip() or install_exc.stdout.strip()}"
+            ) from None
+        try:
+            proc = subprocess.run(
+                [uv_binary, "python", "find", "--no-project", "--managed-python", version],
+                capture_output=True,
+                text=True,
+                check=True,
+                env=clean_env,
+            )
+        except subprocess.CalledProcessError as exc:
+            raise CliError(
+                f"could not find a uv-managed Python {version} after install: "
+                f"{exc.stderr.strip() or exc.stdout.strip()}"
+            ) from None
     managed_python = Path(proc.stdout.strip()).resolve()
     python_dir = managed_python.parent.parent
     if "cpython" not in python_dir.name or "uv" not in str(python_dir):
