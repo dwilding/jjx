@@ -142,12 +142,30 @@ def jjx_pytest_env_args(charm_root: Path) -> list[str]:
     return []
 
 
-def jjx_pytest_args(charm_root: Path) -> list[str]:
-    """Return pytest args: built-in defaults plus any extra args from [tool.jjx].pytest-extra-args."""
+def _split_cli_args(argv: list[str]) -> tuple[list[str], list[str]]:
+    """Split argv into jjx options and extra pytest args at the ``--`` separator.
+
+    Everything before ``--`` is jjx's own flags (``-d``, ``-p``, ``down``).
+    Everything after ``--`` is passed through as extra pytest arguments.
+    """
+    if "--" in argv:
+        idx = argv.index("--")
+        return argv[:idx], argv[idx + 1 :]
+    return argv, []
+
+
+def jjx_pytest_args(charm_root: Path, cli_extra_args: list[str] | None = None) -> list[str]:
+    """Return pytest args: built-in defaults, pyproject extra-args, then CLI extra-args.
+
+    CLI extra-args (passed after ``--`` on the command line) are appended last
+    so they take precedence over ``[tool.jjx].pytest-extra-args``, matching the
+    convention that command-line options override configuration file defaults.
+    """
     default_args = ["tests/integration", "--no-juju-teardown"]
+    cli_args = cli_extra_args or []
     pyproject = charm_root / "pyproject.toml"
     if not pyproject.exists():
-        return default_args
+        return [*default_args, *cli_args]
 
     try:
         with pyproject.open("rb") as fp:
@@ -157,12 +175,12 @@ def jjx_pytest_args(charm_root: Path) -> list[str]:
 
     extra_args = config.get("tool", {}).get("jjx", {}).get("pytest-extra-args")
     if extra_args is None:
-        return default_args
+        return [*default_args, *cli_args]
 
     if not isinstance(extra_args, list) or not all(isinstance(arg, str) for arg in extra_args):
         raise _engine.CliError("ERROR: [tool.jjx].pytest-extra-args must be an array of strings")
 
-    return [*default_args, *extra_args]
+    return [*default_args, *extra_args, *cli_args]
 
 
 def _has_pytest_jubilant(charm_root: Path) -> bool:
@@ -193,8 +211,11 @@ def jjx_cli() -> int:
     The `jjx` CLI can be run when the `jjx` package is installed in the charm's venv,
     or as a tool outside the charm's venv.
     """
+    # Split jjx's own flags from extra pytest args at --.
+    jjx_args, cli_pytest_args = _split_cli_args(sys.argv[1:])
+
     # Handle explicit down command.
-    if len(sys.argv) > 1 and sys.argv[1] == "down":
+    if jjx_args and jjx_args[0] == "down":
         teardown_all_models()
         return 0
 
@@ -206,15 +227,15 @@ def jjx_cli() -> int:
             return 1
     teardown_all_models()
 
-    detach = "-d" in sys.argv
+    detach = "-d" in jjx_args
 
     # Extract -p flag for Docker port publishing.
     docker_publish = None
     publish_output = ""
-    if "-p" in sys.argv:
-        idx = sys.argv.index("-p")
-        if idx + 1 < len(sys.argv):
-            docker_publish = sys.argv[idx + 1]
+    if "-p" in jjx_args:
+        idx = jjx_args.index("-p")
+        if idx + 1 < len(jjx_args):
+            docker_publish = jjx_args[idx + 1]
             if not re.match(r"^\d+:\d+$", docker_publish):
                 sys.stderr.write(
                     f"ERROR: Invalid port format '{docker_publish}': expected <number>:<number>\n"
@@ -223,7 +244,7 @@ def jjx_cli() -> int:
 
     charm_root = _engine._project_root()
     try:
-        pytest_args = jjx_pytest_args(charm_root)
+        pytest_args = jjx_pytest_args(charm_root, cli_pytest_args)
         if "--no-juju-teardown" in pytest_args and not _has_pytest_jubilant(charm_root):
             raise _engine.CliError(
                 "ERROR: pytest-jubilant is not in the 'integration' dependency group."

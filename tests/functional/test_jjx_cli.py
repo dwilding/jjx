@@ -354,6 +354,40 @@ def test_jjx_pytest_select(k8s_1_minimal_patched):
     assert "Removed container " in result.stdout
 
 
+def test_jjx_pytest_select_verbose(k8s_1_minimal_patched):
+    command = [
+        "uv",
+        "run",
+        "jjx",
+        "-d",
+        "--",
+        "-vv",
+    ]
+    result = subprocess.run(
+        command,
+        cwd=k8s_1_minimal_patched,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, (
+        f"jjx exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    )
+    # -vv makes pytest print each test node id with a PASSED/FAILED marker.
+    assert "test_charm.py::test_deploy" in result.stdout
+    # TEARDOWN
+    command = [
+        "uv",
+        "run",
+        "jjx",
+        "down",
+    ]
+    result = subprocess.run(
+        command,
+        cwd=k8s_1_minimal_patched,
+        check=True,
+    )
+
+
 def test_jjx_no_deploy(k8s_1_minimal_patched):
     # Break the integration test that deploys the charm.
     test_charm = k8s_1_minimal_patched / "tests" / "integration" / "test_charm.py"
