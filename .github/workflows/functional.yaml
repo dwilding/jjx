@@ -20,5 +20,4 @@ jobs:
       - name: Run functional tests
         env:
           UV_PYTHON: '3.10'
-        shell: bash
         run: uvx --from rust-just@1.52.0 just functional

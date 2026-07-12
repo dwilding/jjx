@@ -1,0 +1,105 @@
+name: End-to-end tests
+
+on:
+  push:
+    branches:
+      - main
+
+permissions: {}
+
+concurrency:
+  group: e2e-main
+  cancel-in-progress: true
+
+jobs:
+  e2e-tool-cli:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39  # v8.2.0
+      - name: Check out Ops
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+          repository: canonical/operator
+          ref: main
+          fetch-depth: 1
+          path: operator
+      - name: Run httpbin-demo
+        working-directory: operator/examples/httpbin-demo
+        run: uvx --with https://github.com/dwilding/jjx@main jjx -d -p 8000:80 -- -vv
+      - name: Check workload
+        run: curl --fail http://localhost:8000/
+      - name: Tear down
+        working-directory: operator/examples/httpbin-demo
+        run: uvx --with https://github.com/dwilding/jjx@main jjx down
+      - name: Check no workload
+        run: ! curl --fail --max-time 2 http://localhost:8000/
+
+  e2e-tool-pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39  # v8.2.0
+      - name: Check out Ops
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+          repository: canonical/operator
+          ref: main
+          fetch-depth: 1
+          path: operator
+      - name: Test httpbin-demo
+        working-directory: operator/examples/httpbin-demo
+        run: |
+          touch placeholder.charm
+          uv run --group integration --with https://github.com/dwilding/jjx@main pytest tests/integration
+
+  e2e-dep-cli:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39  # v8.2.0
+      - name: Check out Ops
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+          repository: canonical/operator
+          ref: main
+          fetch-depth: 1
+          path: operator
+      - name: Add jjx to httpbin-demo
+        working-directory: operator/examples/httpbin-demo
+        run: uv add --group integration "jjx @ https://github.com/dwilding/jjx@main"
+      - name: Run httpbin-demo
+        working-directory: operator/examples/httpbin-demo
+        run: uv run jjx -d -p 8000:80 -- -vv
+      - name: Check workload
+        run: curl --fail http://localhost:8000/
+      - name: Tear down
+        working-directory: operator/examples/httpbin-demo
+        run: uv run jjx down
+      - name: Check no workload
+        run: ! curl --fail --max-time 2 http://localhost:8000/
+
+  e2e-dep-pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39  # v8.2.0
+      - name: Check out Ops
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+          repository: canonical/operator
+          ref: main
+          fetch-depth: 1
+          path: operator
+      - name: Add jjx to httpbin-demo
+        working-directory: operator/examples/httpbin-demo
+        run: uv add --group integration "jjx @ https://github.com/dwilding/jjx@main"
+      - name: Test httpbin-demo
+        working-directory: operator/examples/httpbin-demo
+        run: |
+          touch placeholder.charm
+          uv run --group integration pytest tests/integration
