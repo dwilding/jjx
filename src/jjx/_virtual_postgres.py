@@ -49,15 +49,24 @@ def _docker_exec(container_name: str, command: list[str], timeout: float = 30.0)
     return proc.stdout
 
 
-def _wait_for_postgres(container_name: str, timeout: float = 60.0) -> None:
-    """Wait until postgres is ready to accept connections."""
+def _wait_for_postgres(container_name: str, database_name: str, timeout: float = 60.0) -> None:
+    """Wait until postgres is fully ready and the database exists.
+
+    The postgres Docker entrypoint starts a temporary server to perform
+    initialisation (creating users, databases, etc.), then shuts it down
+    and starts the real server. ``pg_isready`` can report "accepting
+    connections" during the temporary-server phase, but ``psql`` will fail
+    with "the database system is shutting down" or "database does not exist"
+    if we try to use it then. To avoid this race, we wait until we can
+    actually run a query against the target database.
+    """
     deadline = time.monotonic() + timeout
     last_error = ""
     while time.monotonic() < deadline:
         try:
             _docker_exec(
                 container_name,
-                ["pg_isready", "-U", "postgres"],
+                ["psql", "-U", "postgres", "-d", database_name, "-c", "SELECT 1"],
                 timeout=5.0,
             )
             return
@@ -92,7 +101,7 @@ def start_postgres(
         },
     )
 
-    _wait_for_postgres(container_name)
+    _wait_for_postgres(container_name, database_name)
 
     details = _engine._docker_container_details(container_name)
     if not details.running:
@@ -132,11 +141,6 @@ def start_postgres(
     }
 
 
-def stop_postgres(container_name: str) -> None:
-    """Stop and remove a postgres container."""
-    _engine._docker_rm(container_name)
-
-
 def populate_relation(
     model_state: dict[str, Any],
     relation: dict[str, Any],
@@ -146,11 +150,23 @@ def populate_relation(
     """Write the provider-side relation data and create the secret.
 
     This mimics what the postgresql-k8s charm's DatabaseProvides would write:
+    - ``database``: the database name (written via set_database)
     - ``endpoints``: normal databag field "host:port"
     - ``secret-user``: secret URI containing username + password
     - ``provided-secrets``: JSON list ["secret-user"]
     - ``data``: JSON snapshot for diff tracking
     """
+    # Refresh the container IP in case it changed since deploy time
+    # (e.g. due to a Docker restart).
+    container_name = pg_info["container_name"]
+    try:
+        details = _engine._docker_container_details(container_name)
+        if details.running and details.ip_address:
+            pg_info["host"] = details.ip_address
+            pg_info["ip_address"] = details.ip_address
+    except _engine.CliError:
+        pass  # Use the IP captured at deploy time
+
     # Create the secret with username and password.
     secret_id = _engine._next_secret_id(model_state)
     secret = {
@@ -171,6 +187,7 @@ def populate_relation(
 
     # Write provider app databag.
     app_bucket = _engine._relation_data_bucket(relation, provider_app, None)
+    app_bucket["database"] = pg_info["database"]
     endpoints = f"{pg_info['host']}:{pg_info['port']}"
     app_bucket["endpoints"] = endpoints
     app_bucket["secret-user"] = secret_id
