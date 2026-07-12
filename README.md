@@ -98,7 +98,7 @@ For example:
 uvx jjx -- -vv
 ```
 
-To automatically include extra pytest options when you run jjx, use a `[tool.jjx]` table in `pyproject.toml`. For example:
+To automatically include extra pytest options, use a `[tool.jjx]` table in `pyproject.toml`. For example:
 
 ```toml
 [tool.jjx]
