@@ -36,15 +36,12 @@ curl -X POST -d 'name=elephant' localhost:5000/addname/
 curl localhost:5000/names  # returns {"names":{"1":"elephant"}}
 ```
 
-TODO - `docker ps`
-
 ## System requirements
 
 - **[uv](https://docs.astral.sh/uv/getting-started/installation/)** — To install on Ubuntu, run `sudo snap install astral-uv --classic`.
-
 - **[Docker](https://docs.docker.com/engine/install/)** — To install on Ubuntu, run `sudo snap install docker`.
 
-    By default, Docker commands require `sudo`, but jjx runs Docker commands as a regular user. To allow Docker commands, run `sudo usermod -aG docker $USER`, then log out and log back in again.
+By default, Docker commands require `sudo`, but jjx runs Docker commands as a regular user. To allow Docker commands, run `sudo usermod -aG docker $USER`, then log out and log back in again.
 
 ## Usage
 
@@ -84,24 +81,44 @@ To stop the workload:
 uvx jjx down
 ```
 
+### Set extra pytest options
+
+jjx uses pytest to run the charm's integration tests. See [How jjx works](#how-jjx-works).
+
+To set extra pytest options:
+
+```text
+uvx jjx -- <pytest-args>
+```
+
+For example:
+
+```sh
+# Enable verbose logging, to show more detail about each test.
+uvx jjx -- -vv
+```
+
+To automatically include extra pytest options when you run jjx, use a `[tool.jjx]` table in `pyproject.toml`. For example:
+
+```toml
+[tool.jjx]
+pytest-extra-args = ["-k", "test_deploy"]
+```
+
 ## How jjx works
 
 The `jjx` Python package provides a `juju` command that is partially compatible with the real `juju` command. Running `uvx jjx` in the charm dir is equivalent to:
 
-```text
+```sh
 touch placeholder.charm
 uv run --group integration --with jjx pytest tests/integration --no-juju-teardown
 rm placeholder.charm
 ```
 
-When the integration tests try to deploy a `.charm` file along with a workload image, `juju` starts a container for the charm code. `juju` also starts a container for the workload and injects Pebble into the container. The charm code has access to the Pebble socket, as expected by Ops.
+When the integration tests try to deploy a `.charm` file along with a workload image, `juju` starts a container for the charm code. `juju` also starts a container for the workload and injects Pebble into the container. The charm code has access to the Pebble socket, as Ops expects.
 
-Other Jubilant methods are handled by `juju` and routed to the charm code. For example, if an integration test calls `Juju.config()`, `juju` executes the charm code with its environment configured as a config-changed event. Ops recognises the event and the charm code is able to enact the change using Pebble methods.
+Other Jubilant methods are handled by `juju` and routed to the charm code. For example, if an integration test calls `Juju.config()`, `juju` executes the charm code with its environment configured as a config-changed event. Ops recognizes the event and the charm code is able to apply the change using Pebble methods.
 
 If the integration tests try to deploy [postgresql-k8s](https://charmhub.io/postgresql-k8s), `juju` starts a container for the official [postgres](https://hub.docker.com/_/postgres) image and mocks the behavior of charmed PostgreSQL K8s. Once integrated with "postgresql-k8s", the charm code thinks it's talking to a real remote unit.
 
 In other words, everything is real from the perspective of the charm and its integration tests. The mocked parts are Juju, the cloud, and other charms.
-
-## Customize the integration tests
-
-TODO
