@@ -21,7 +21,7 @@ The charm can't be too complex. If it requires storage, multiple units, or other
 ```sh
 # Grab a small K8s charm that requires a PostgreSQL database.
 git clone https://github.com/canonical/operator.git
-cd operator/examples/k8s-3-postgresql
+cd operator/examples/k8s-3-postgresql/
 charmcraft fetch-libs
 
 # Run the workload, mapping localhost port 5000 to workload port 8000.
