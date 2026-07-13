@@ -19,7 +19,7 @@ The charm can't be too complex. If it requires storage, multiple units, or other
 ## Demo
 
 ```sh
-# Grab a simple K8s charm that requires a PostgreSQL database.
+# Grab a small K8s charm that requires a PostgreSQL database.
 git clone https://github.com/canonical/operator.git
 cd operator/examples/k8s-3-postgresql
 charmcraft fetch-libs
