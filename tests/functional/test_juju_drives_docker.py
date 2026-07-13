@@ -128,6 +128,26 @@ def test_pebble_services():
     assert "fastapi-service" in result.stdout
 
 
+def test_pebble_logs():
+    command = [
+        "docker",
+        "exec",
+        "jjx-default-fastapi-demo",
+        "/charm/bin/pebble",
+        "logs",
+        "fastapi-service",
+    ]
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, (
+        f"docker exec exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    )
+    assert "Uvicorn running" in result.stdout
+
+
 def test_server_changes_port(k8s_2_configurable):
     # Check that the server responds on the currently-configured port.
     command = [
