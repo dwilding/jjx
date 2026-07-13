@@ -36,7 +36,7 @@ curl -X POST -d 'name=elephant' localhost:5000/addname/
 curl localhost:5000/names  # returns {"names":{"1":"elephant"}}
 ```
 
-You can also interrogate Pebble using [borescope](https://github.com/tonyandrewmeyer/borescope):
+You can also probe the workload using [borescope](https://github.com/tonyandrewmeyer/borescope):
 
 ```sh
 uvx borescope --socket .jjx/socket
