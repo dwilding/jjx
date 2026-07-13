@@ -61,7 +61,7 @@ For more detail, see [Command reference](https://borescope.dev/docs/reference-co
 - **[uv](https://docs.astral.sh/uv/getting-started/installation/)** — To install on Ubuntu, run `sudo snap install astral-uv --classic`.
 - **[Docker](https://docs.docker.com/engine/install/)** — To install on Ubuntu, run `sudo snap install docker`.
 
-By default, Docker commands require `sudo`, but jjx runs Docker commands as a regular user. To allow Docker commands, run `sudo usermod -aG docker $USER`, then log out and log back in again.
+By default, Docker commands require `sudo`, but jjx runs Docker commands as a regular user. To allow Docker commands, run `sudo usermod -aG docker $USER`, then log out and log in again.
 
 ## Usage
 
@@ -139,6 +139,6 @@ When the integration tests try to deploy a `.charm` file along with a workload i
 
 Other Jubilant methods are handled by `juju` and routed to the charm code. For example, if an integration test calls `Juju.config()`, `juju` executes the charm code with its environment configured as a config-changed event. Ops recognizes the event and the charm code is able to apply the change using Pebble methods.
 
-If the integration tests try to deploy [postgresql-k8s](https://charmhub.io/postgresql-k8s), `juju` starts a container for the official [postgres](https://hub.docker.com/_/postgres) image and mocks the behavior of charmed PostgreSQL K8s. Once integrated with "postgresql-k8s", the charm code thinks it's talking to a real remote unit.
+If the integration tests try to deploy [postgresql-k8s](https://charmhub.io/postgresql-k8s), `juju` starts a container for the official [postgres](https://hub.docker.com/_/postgres) image and mocks the behavior of Charmed PostgreSQL. Once integrated with "postgresql-k8s", the charm code thinks it's talking to a real remote unit.
 
 In other words, everything is real from the perspective of the charm and its integration tests. The mocked parts are Juju, the cloud, and other charms.
