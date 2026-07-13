@@ -109,6 +109,25 @@ def test_server_process(k8s_2_configurable):
     assert_one_process()
 
 
+def test_pebble_services():
+    command = [
+        "docker",
+        "exec",
+        "jjx-default-fastapi-demo",
+        "/charm/bin/pebble",
+        "services",
+    ]
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, (
+        f"docker exec exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    )
+    assert "fastapi-service" in result.stdout
+
+
 def test_server_changes_port(k8s_2_configurable):
     # Check that the server responds on the currently-configured port.
     command = [
