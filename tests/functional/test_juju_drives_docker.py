@@ -1,6 +1,7 @@
 import pathlib
 import time
 import subprocess
+import urllib.request
 
 PACKAGE_DIR = pathlib.Path(__file__).parent.parent.parent
 JUJU = [
@@ -17,9 +18,8 @@ JUJU = [
 def assert_one_process() -> None:
     command = [
         "docker",
-        "exec",
+        "top",
         "jjx-default-fastapi-demo",
-        "ps",
     ]
     result = subprocess.run(
         command,
@@ -27,9 +27,40 @@ def assert_one_process() -> None:
         text=True,
     )
     assert result.returncode == 0, (
-        f"docker exec exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        f"docker top exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
     assert result.stdout.count("uvicorn") == 1
+
+
+def assert_server_state(port: int, expect_up: bool) -> None:
+    assert server_up(get_container_ip(), port) == expect_up
+
+
+def server_up(ip: str, port: int) -> bool:
+    url = f"http://{ip}:{port}/version"
+    try:
+        response = urllib.request.urlopen(url, timeout=2)
+    except Exception:
+        return False
+    return response.status == 200
+
+
+def get_container_ip() -> str:
+    result = subprocess.run(
+        [
+            "docker",
+            "inspect",
+            "--format",
+            "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
+            "jjx-default-fastapi-demo",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, (
+        f"docker inspect exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    )
+    return result.stdout.strip()
 
 
 def test_server_process(k8s_2_configurable):
@@ -76,29 +107,6 @@ def test_server_process(k8s_2_configurable):
     )
     # Check that there's one server process in the container.
     assert_one_process()
-
-
-def assert_server_state(port: int, expect_up: bool) -> None:
-    code = (
-        "import sys, urllib.request;"
-        f"url = 'http://127.0.0.1:{str(port)}/version';"
-        "response = urllib.request.urlopen(url, timeout=2);"
-        "assert response.status == 200"
-    )
-    command = [
-        "docker",
-        "exec",
-        "jjx-default-fastapi-demo",
-        "python3",
-        "-c",
-        code,
-    ]
-    result = subprocess.run(
-        command,
-        capture_output=True,
-        text=True,
-    )
-    assert (result.returncode == 0) == expect_up
 
 
 def test_server_changes_port(k8s_2_configurable):
