@@ -43,8 +43,8 @@ def test_deploy(charm: pathlib.Path, juju: jubilant.Juju):
     juju.wait(jubilant.all_active)
 
 
-def test_workload_version_is_set(juju: jubilant.Juju):
-    # Verify that the workload version has been set.
+def test_workload_version_is_set(charm: pathlib.Path, juju: jubilant.Juju):
+    """Verify that the workload version has been set."""
     unit_ip = juju.status().apps[APP_NAME].units[f"{APP_NAME}/0"].address
     response = urllib.request.urlopen(f"http://{unit_ip}:8000/version")
     data = json.loads(response.read())

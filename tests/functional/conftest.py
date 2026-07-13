@@ -8,9 +8,9 @@ import pytest
 PACKAGE_DIR = pathlib.Path(__file__).parent.parent.parent
 CHARMS_DIR = pathlib.Path(__file__).parent / "charms"
 CHARM_PARAMS = [
-    pytest.param(dir, id=dir.name)
-    for dir in sorted(CHARMS_DIR.iterdir(), key=lambda d: d.name)
-    if dir.is_dir()
+    pytest.param(d, id=d.name)
+    for d in sorted(CHARMS_DIR.iterdir(), key=lambda d: d.name)
+    if d.is_dir()
 ]
 
 
@@ -42,6 +42,7 @@ def system_ready():
         text=True,
     )
     assert result.returncode == 0, result.stderr.strip() or "cannot access docker daemon"
+    yield
 
 
 @pytest.fixture(scope="module")
