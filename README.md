@@ -36,6 +36,26 @@ curl -X POST -d 'name=elephant' localhost:5000/addname/
 curl localhost:5000/names  # returns {"names":{"1":"elephant"}}
 ```
 
+You can also interrogate Pebble using [borescope](https://github.com/tonyandrewmeyer/borescope):
+
+```sh
+uvx borescope --socket .jjx/socket
+```
+
+This gives you a prompt that feels like bash and has first-class support for Pebble commands. For example:
+
+<pre>
+<b>pebble:/#</b> ls api_demo_server/
+__init__.py
+app.py
+database.py
+<b>pebble:/#</b> services
+<b>SERVICE</b>          <b>STARTUP</b>  <b>CURRENT</b>
+fastapi-service  enabled  active
+</pre>
+
+For more detail, see [Command reference](https://borescope.dev/docs/reference-commands.html) in the borescope docs.
+
 ## System requirements
 
 - **[uv](https://docs.astral.sh/uv/getting-started/installation/)** — To install on Ubuntu, run `sudo snap install astral-uv --classic`.
