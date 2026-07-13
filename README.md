@@ -19,9 +19,9 @@ The charm can't be too complex. If it requires storage, multiple units, or other
 ## Demo
 
 ```sh
-# Grab a simple K8s charm that requires a PostgreSQL database.
+# Grab a small K8s charm that requires a PostgreSQL database.
 git clone https://github.com/canonical/operator.git
-cd operator/examples/k8s-3-postgresql
+cd operator/examples/k8s-3-postgresql/
 charmcraft fetch-libs
 
 # Run the workload, mapping localhost port 5000 to workload port 8000.
@@ -36,12 +36,32 @@ curl -X POST -d 'name=elephant' localhost:5000/addname/
 curl localhost:5000/names  # returns {"names":{"1":"elephant"}}
 ```
 
+You can also probe the workload using [borescope](https://github.com/tonyandrewmeyer/borescope):
+
+```sh
+uvx borescope --socket .jjx/socket
+```
+
+This gives you a prompt that feels like bash and has first-class support for Pebble commands. For example:
+
+<pre>
+<b>pebble:/#</b> ls api_demo_server/
+__init__.py
+app.py
+database.py
+<b>pebble:/#</b> services
+<b>SERVICE</b>          <b>STARTUP</b>  <b>CURRENT</b>
+fastapi-service  enabled  active
+</pre>
+
+For more detail, see [Command reference](https://borescope.dev/docs/reference-commands.html) in the borescope docs.
+
 ## System requirements
 
 - **[uv](https://docs.astral.sh/uv/getting-started/installation/)** — To install on Ubuntu, run `sudo snap install astral-uv --classic`.
 - **[Docker](https://docs.docker.com/engine/install/)** — To install on Ubuntu, run `sudo snap install docker`.
 
-By default, Docker commands require `sudo`, but jjx runs Docker commands as a regular user. To allow Docker commands, run `sudo usermod -aG docker $USER`, then log out and log back in again.
+By default, Docker commands require `sudo`, but jjx runs Docker commands as a regular user. To allow Docker commands, run `sudo usermod -aG docker $USER`, then log out and log in again.
 
 ## Usage
 
@@ -119,6 +139,6 @@ When the integration tests try to deploy a `.charm` file along with a workload i
 
 Other Jubilant methods are handled by `juju` and routed to the charm code. For example, if an integration test calls `Juju.config()`, `juju` executes the charm code with its environment configured as a config-changed event. Ops recognizes the event and the charm code is able to apply the change using Pebble methods.
 
-If the integration tests try to deploy [postgresql-k8s](https://charmhub.io/postgresql-k8s), `juju` starts a container for the official [postgres](https://hub.docker.com/_/postgres) image and mocks the behavior of charmed PostgreSQL K8s. Once integrated with "postgresql-k8s", the charm code thinks it's talking to a real remote unit.
+If the integration tests try to deploy [postgresql-k8s](https://charmhub.io/postgresql-k8s), `juju` starts a container for the official [postgres](https://hub.docker.com/_/postgres) image and mocks the behavior of Charmed PostgreSQL. Once integrated with "postgresql-k8s", the charm code thinks it's talking to a real remote unit.
 
 In other words, everything is real from the perspective of the charm and its integration tests. The mocked parts are Juju, the cloud, and other charms.
