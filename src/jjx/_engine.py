@@ -709,22 +709,6 @@ def _start_charm_runner(
         command=["-c", "import time; time.sleep(999999)"],
     )
 
-    # Create the pebble socket symlink so ops can find it at the expected path.
-    # ops constructs the socket path from JUJU_CHARM_DIR: /charm/containers/<workload>/pebble.socket
-    # Use Python instead of mkdir/ln because the charm runner image is minimal
-    # and may not have coreutils in PATH.
-    pebble_socket_dir = f"/charm/containers/{workload}"
-    _docker_exec(
-        charm_runner_name,
-        [
-            container_python,
-            "-c",
-            f"import os, pathlib; pathlib.Path({pebble_socket_dir!r}).mkdir(parents=True, exist_ok=True); "
-            f"src='/jjx/socket'; dst={pebble_socket_dir!r}+'/pebble.socket'; "
-            f"os.symlink(src, dst) if not os.path.exists(dst) else None",
-        ],
-    )
-
     app_state["charm_runner_name"] = charm_runner_name
     app_state["charm_runner_id"] = container_id
     app_state["container_python"] = container_python
@@ -1140,8 +1124,48 @@ def _run_charm_event(
         )
 
 
+def _create_pebble_socket_symlink(
+    charm_runner_name: str,
+    container_python: str,
+    workload_name: str,
+) -> None:
+    """Create the pebble socket symlink so ops can find it at the expected path.
+
+    ops constructs the socket path from JUJU_CHARM_DIR:
+    /charm/containers/<workload>/pebble.socket
+
+    Use Python instead of mkdir/ln because the charm runner image is minimal
+    and may not have coreutils in PATH.
+    """
+    pebble_socket_dir = f"/charm/containers/{workload_name}"
+    _docker_exec(
+        charm_runner_name,
+        [
+            container_python,
+            "-c",
+            f"import os, pathlib; pathlib.Path({pebble_socket_dir!r}).mkdir(parents=True, exist_ok=True); "
+            f"src='/jjx/socket'; dst={pebble_socket_dir!r}+'/pebble.socket'; "
+            f"os.symlink(src, dst) if not os.path.exists(dst) else None",
+        ],
+    )
+
+
 def _run_deploy_event_flow(model_name: str, app_name: str, workload_name: str) -> None:
+    # Fire config-changed *before* creating the pebble socket symlink. This
+    # models real Juju, where config-changed fires before the workload
+    # container has started, so the charm cannot reach Pebble yet. The charm's
+    # _replan_workload will hit a ConnectionError and return early, just like
+    # it does in real Juju.
     _run_charm_event(model_name, app_name, "config-changed", "hooks/config-changed")
+
+    # Now create the symlink — Pebble is "ready" from the charm's perspective.
+    state = _load_state()
+    app_state = state["models"][model_name]["apps"][app_name]
+    charm_runner_name = app_state.get("charm_runner_name", "")
+    container_python = app_state.get("container_python", "")
+    if charm_runner_name and container_python:
+        _create_pebble_socket_symlink(charm_runner_name, container_python, workload_name)
+
     _run_charm_event(
         model_name,
         app_name,
