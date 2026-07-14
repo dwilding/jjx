@@ -133,7 +133,7 @@ The charm runner is a persistent Docker container that executes charm hooks.
 
 **Environment**: The charm runner container is started with `PYTHONPATH` set to `/venv/lib/python3.XX/site-packages:/jjx-src:/charm/lib`. However, `docker exec` does not inherit environment variables from `docker run`, so `jjx` passes `PATH` and `PYTHONPATH` explicitly via `docker exec -e` for each hook execution. This ensures both the charm process and its hook tool subprocesses can find `jjx` and the hook tools.
 
-**Pebble socket**: A symlink is created inside the charm runner at `/charm/containers/<workload>/pebble.socket` → `/jjx/socket`, so `ops` can find the Pebble socket at the path it expects. The symlink and parent directory are created via Python (`pathlib.Path.mkdir` + `os.symlink`) because the charm runner image has no `mkdir` or `ln` in PATH.
+**Pebble socket**: A symlink is created inside the charm runner at `/charm/containers/<workload>/pebble.socket` → `/jjx/socket`, so `ops` can find the Pebble socket at the path it expects. The symlink and parent directory are created via Python (`pathlib.Path.mkdir` + `os.symlink`) because the charm runner image has no `mkdir` or `ln` in PATH. The symlink is **not** created at container startup — it is created during the deploy event flow, between `config-changed` and `pebble-ready` (see deploy flow below). This models real Juju, where `config-changed` fires before the workload container has started, so the charm cannot reach Pebble yet. The charm's `_replan_workload` hits a `ConnectionError` and returns early, just like it does in real Juju.
 
 **Entrypoint**: The container runs `python -c 'import time; time.sleep(999999)'` — it stays alive doing nothing. Charm hooks are executed via `docker exec`.
 
@@ -161,11 +161,12 @@ Deploy flow:
 3. start workload container and Pebble on Docker bridge networking (no host networking)
    - if `JJX_DOCKER_PUBLISH` is set to `HOST_PORT:CONTAINER_PORT`, add Docker publish `127.0.0.1:HOST_PORT:CONTAINER_PORT`
 4. start charm runner container (`--network=container:<workload>`, bind-mounts for Python, venv, jjx source, charm dir, state dir)
-5. create Pebble socket symlink inside charm runner (via Python, not `mkdir`/`ln`)
-6. wait for Pebble socket to be connectable inside charm runner
-7. generate hook tool scripts in `./.jjx/hook-tools/` (Python scripts with `#!/python/bin/python3.XX` shebangs)
-8. run charm hooks via `docker exec` into charm runner (passing `PATH` and `PYTHONPATH` via `docker exec -e`)
-9. persist resulting app and unit status
+5. wait for Pebble socket (`/jjx/socket`) to be connectable inside charm runner
+6. generate hook tool scripts in `./.jjx/hook-tools/` (Python scripts with `#!/python/bin/python3.XX` shebangs)
+7. run `config-changed` hook via `docker exec` into charm runner (Pebble socket symlink does **not** exist yet — charm cannot reach Pebble, matching real Juju)
+8. create Pebble socket symlink inside charm runner (via Python, not `mkdir`/`ln`) — Pebble is now accessible from the charm
+9. run `<workload>-pebble-ready` hook via `docker exec` into charm runner
+10. persist resulting app and unit status
 
 Config flow:
 

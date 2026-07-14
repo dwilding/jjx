@@ -109,6 +109,28 @@ def test_server_process(k8s_2_configurable):
     assert_one_process()
 
 
+def test_pebble_was_unreachable(k8s_2_configurable):
+    command = [
+        *JUJU,
+        "debug-log",
+        "--limit",
+        "100",
+    ]
+    result = subprocess.run(
+        command,
+        cwd=k8s_2_configurable,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, (
+        f"juju debug-log exited with code {result.returncode}\n"
+        f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    )
+    # Check that Pebble was unreachable when handling config-changed, as with real Juju.
+    # The log message comes from _replan_workload() - called on config-changed and pebble-ready.
+    assert "Unable to connect to Pebble" in result.stdout
+
+
 def test_pebble_services():
     command = [
         "docker",
