@@ -1,6 +1,6 @@
 [project]
 name = "jjx"
-version = "0.3.0.dev0"
+version = "0.3.0"
 description = "A Juju-on-Docker test adapter for simple Kubernetes charms."
 authors = [
     { name = "Dave Wilding", email = "tech@dpw.me" },
@@ -19,15 +19,15 @@ juju = "jjx._cli:juju_cli"
 
 [dependency-groups]
 dev = [
-    "ruff==0.15.16",
-    "pytest==9.0.3",
-    "ty==0.0.44",
-    "zizmor==1.25.2",
+    "ruff==0.15.20",
+    "pytest==9.1.1",
+    "ty==0.0.56",
+    "zizmor==1.26.1",
 ]
 
 [build-system]
 requires = [
-    "uv_build==0.11.19",
+    "uv_build==0.11.27",
 ]
 build-backend = "uv_build"
 
