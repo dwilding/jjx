@@ -107,7 +107,7 @@ The `.charm` file passed to deploy is a trigger only. `jjx` does not inspect or 
 
 Notes on generated runtime files:
 
-- Pebble runtime files are created inside the workload container under Pebble's default state path: `/var/lib/pebble/default`.
+- Pebble runtime files are created inside the workload container under a jjx-managed state path: `./.jjx/pebble/` (mounted at `/jjx/pebble` in the container). Any baked-in Pebble layers from the OCI image (e.g. Rockcraft layers at `/var/lib/pebble/default/layers/`) are copied into this directory before Pebble starts, so service definitions like `startup: enabled` are preserved for charm layers using `override: merge`.
 - `./.jjx/socket` is the Pebble API Unix socket. It is bind-mounted into the workload container (where Pebble creates it) and into the charm runner container (where charm code and hook tools connect to it).
 - `JJX_STATE_DIR` is set to `/jjx` (the in-container mount point of `.jjx/`) in the charm runner environment. Hook tools call back into `jjx` to read and write state; this env var lets them locate state directly.
 - `./.jjx/charm/.unit-state.db` is created by charm runtime state persistence (written by `ops` via `sqlite3` to `JUJU_CHARM_DIR/.unit-state.db`, which inside the charm runner is `/charm/.unit-state.db`).
