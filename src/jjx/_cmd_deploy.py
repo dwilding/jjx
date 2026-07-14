@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import re
+import subprocess
 import uuid
 from pathlib import Path
 from typing import Any
@@ -43,6 +44,47 @@ def _docker_publish_from_env() -> str | None:
     if not raw:
         return None
     return _parse_docker_publish(raw)
+
+
+def _copy_image_pebble_layers(image: str, dest_layers_dir: Path) -> None:
+    """Copy baked-in Pebble layers from an OCI image into the state directory.
+
+    Some OCI images (e.g. rocks built with Rockcraft) ship Pebble layers at
+    ``/var/lib/pebble/default/layers/``. These define service defaults like
+    ``startup: enabled`` that charm layers using ``override: merge`` inherit.
+
+    Since jjx uses a separate Pebble state path (not the image's
+    ``/var/lib/pebble/default``), we copy these layers into our state directory
+    so Pebble sees them. If the image has no layers, this is a no-op.
+    """
+    # Use a throwaway container to extract layers from the image filesystem.
+    # We can't use `docker cp` from a running container because the image may
+    # not have a shell or any entrypoint that stays alive.
+    container_name = f"jjx-layer-copy-{uuid.uuid4().hex[:8]}"
+    try:
+        subprocess.run(
+            ["docker", "create", "--name", container_name, image, "true"],
+            capture_output=True,
+            text=True,
+        )
+        # Copy the layers directory out of the image.
+        # Non-zero exit just means the image has no layers directory — that's fine.
+        subprocess.run(
+            [
+                "docker",
+                "cp",
+                f"{container_name}:/var/lib/pebble/default/layers/.",
+                str(dest_layers_dir),
+            ],
+            capture_output=True,
+            text=True,
+        )
+    finally:
+        subprocess.run(
+            ["docker", "rm", "--force", container_name],
+            capture_output=True,
+            text=True,
+        )
 
 
 def _parse_deploy_args(args: list[str]) -> tuple[str, str, dict[str, str]]:
@@ -170,6 +212,20 @@ def deploy(args: list[str], model: str | None) -> int:
     if not pebble_binary.is_file():
         raise _engine.CliError(f"pebble cache path is not a file: {pebble_binary}")
 
+    # Prepare Pebble state directory on the host (bind-mounted at /jjx).
+    # We use /jjx/pebble as the Pebble state path (PEBBLE env) instead of
+    # the image's /var/lib/pebble/default. This avoids shadowing the image's
+    # baked-in Pebble layers with a tmpfs mount. Instead, we copy any layers
+    # from the image into our state directory so they are visible to Pebble.
+    pebble_state_dir = jjx_dir / "pebble"
+    pebble_layers_dir = pebble_state_dir / "layers"
+    pebble_layers_dir.mkdir(parents=True, exist_ok=True)
+
+    # Copy baked-in Pebble layers from the OCI image (if any) into our state
+    # directory. This preserves the image's service definitions (e.g. startup:
+    # enabled) so that charm layers using override: merge inherit them correctly.
+    _copy_image_pebble_layers(image, pebble_layers_dir)
+
     mounts = [
         (str(pebble_binary), "/charm/bin/pebble", True),
         (str(jjx_dir), "/jjx", False),
@@ -179,10 +235,10 @@ def deploy(args: list[str], model: str | None) -> int:
         image,
         container_name,
         mounts=mounts,
-        tmpfs_mounts=["/plan:mode=1777", "/var/lib/pebble/default:mode=1777"],
+        tmpfs_mounts=["/plan:mode=1777"],
         publish=publish,
         env={
-            "PEBBLE": "/var/lib/pebble/default",
+            "PEBBLE": "/jjx/pebble",
             "PEBBLE_SOCKET": "/jjx/socket",
             "PYTHONPATH": "/",
         },
