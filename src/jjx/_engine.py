@@ -5,12 +5,15 @@ This module implements the minimal Juju-like behavior described in DESIGN.md.
 
 from __future__ import annotations
 
+import glob
 import io
 import json
 import os
 import re
 import shutil
+import signal
 import subprocess
+import sys
 import tarfile
 import time
 import uuid
@@ -110,10 +113,14 @@ def _save_state(state: dict[str, Any]) -> None:
     jjx.mkdir(parents=True, exist_ok=True)
     _gitignore_path().write_text("*\n", encoding="utf-8")
     _hook_tools_dir().mkdir(parents=True, exist_ok=True)
-    _state_path().write_text(
+    # Write to a temp file then atomically replace, so a concurrent _load_state
+    # reader sees either the old or new file, never a half-written one.
+    tmp_path = _state_path().with_suffix(".json.tmp")
+    tmp_path.write_text(
         json.dumps(state, indent=2, sort_keys=True),
         encoding="utf-8",
     )
+    os.replace(tmp_path, _state_path())
 
 
 def _cleanup_model_artifacts() -> None:
@@ -1150,15 +1157,22 @@ def _create_pebble_socket_symlink(
     )
 
 
-def _run_deploy_event_flow(model_name: str, app_name: str, workload_name: str) -> None:
-    # Fire config-changed *before* creating the pebble socket symlink. This
-    # models real Juju, where config-changed fires before the workload
-    # container has started, so the charm cannot reach Pebble yet. The charm's
-    # _replan_workload will hit a ConnectionError and return early, just like
-    # it does in real Juju.
+def _run_config_changed_event(model_name: str, app_name: str) -> None:
+    """Fire config-changed synchronously.
+
+    This models real Juju, where config-changed fires before the workload
+    container has started, so the charm cannot reach Pebble yet. The charm's
+    _replan_workload will hit a ConnectionError and return early, just like
+    it does in real Juju.
+    """
     _run_charm_event(model_name, app_name, "config-changed", "hooks/config-changed")
 
-    # Now create the symlink — Pebble is "ready" from the charm's perspective.
+
+def _run_pebble_ready_event(model_name: str, app_name: str, workload_name: str) -> None:
+    """Create the pebble socket symlink and dispatch pebble-ready.
+
+    This is called by the background subprocess after the minimum deploy delay.
+    """
     state = _load_state()
     app_state = state["models"][model_name]["apps"][app_name]
     charm_runner_name = app_state.get("charm_runner_name", "")
@@ -1173,6 +1187,83 @@ def _run_deploy_event_flow(model_name: str, app_name: str, workload_name: str) -
         f"hooks/{workload_name}-pebble-ready",
         workload_name=workload_name,
     )
+
+
+def _run_deploy_event_flow(model_name: str, app_name: str, workload_name: str) -> None:
+    """Run config-changed then pebble-ready synchronously (for tests)."""
+    _run_config_changed_event(model_name, app_name)
+    _run_pebble_ready_event(model_name, app_name, workload_name)
+
+
+# Minimum delay (seconds) between deploy() returning and pebble-ready firing.
+# Must exceed jubilant's wait() minimum return time (~2.0s with delay=1.0,
+# successes=3) so that tests using wait() cannot race ahead of container
+# readiness. This is a deliberate stress-test floor, not a model of real Juju
+# latency.
+PEBBLE_READY_DELAY = 3.0
+
+
+def _spawn_background_pebble_ready(
+    model_name: str,
+    app_name: str,
+    workload_name: str,
+) -> None:
+    """Spawn a detached subprocess that dispatches pebble-ready after a delay.
+
+    The subprocess sleeps for PEBBLE_READY_DELAY, then creates the pebble socket
+    symlink and dispatches the pebble-ready event. It survives the juju shim
+    exiting (start_new_session=True) so deploy() can return before pebble-ready
+    fires.
+    """
+    state_dir = str(_jjx_dir().resolve())
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "jjx._background_pebble_ready",
+            state_dir,
+            model_name,
+            app_name,
+            workload_name,
+        ],
+        start_new_session=True,  # detach from parent's process group
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    # Write a PID marker file so teardown can find and kill this process.
+    # Format: <app_name>.<pid>.deploy — the app name lets remove-application
+    # kill just this app's process without affecting others.
+    marker = _jjx_dir() / f"{app_name}.{proc.pid}.deploy"
+    marker.write_text(str(proc.pid), encoding="utf-8")
+
+
+def _kill_background_processes(app_name: str | None = None) -> None:
+    """Find and kill background pebble-ready processes.
+
+    If app_name is given, kills only that app's process. Otherwise kills all.
+    Looks for .jjx/<app_name>.<pid>.deploy marker files, reads the PID, and
+    kills the process group (background processes are spawned with
+    start_new_session=True).
+    """
+    jjx_dir = _jjx_dir()
+    pattern = f"{app_name}.*.deploy" if app_name else "*.deploy"
+    for marker in glob.glob(str(jjx_dir / pattern)):
+        try:
+            pid = int(Path(marker).read_text(encoding="utf-8").strip())
+        except (ValueError, OSError):
+            try:
+                Path(marker).unlink(missing_ok=True)
+            except OSError:
+                pass
+            continue
+        try:
+            os.killpg(pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            pass
+        try:
+            Path(marker).unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _run_config_event_flow(model_name: str, app_name: str) -> None:
