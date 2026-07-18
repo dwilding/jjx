@@ -20,6 +20,11 @@ def destroy_model(args: list[str]) -> int:
     if not model_name:
         raise _engine.CliError("usage: juju destroy-model <model>")
 
+    # Kill any in-flight background pebble-ready processes before removing
+    # containers — otherwise they might try to docker exec into containers
+    # we're about to remove.
+    _engine._kill_background_processes()
+
     state = _engine._load_state()
     model_state = state.get("models", {}).get(model_name)
     if model_state is None:

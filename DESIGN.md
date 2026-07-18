@@ -102,6 +102,7 @@ The `.charm` file passed to deploy is a trigger only. `jjx` does not inspect or 
 - `./.jjx/hook-tools/`
 - `./.jjx/charm/` (staged runtime charm directory with `src/`, `lib/`, `metadata.yaml`, `config.yaml`, and `.unit-state.db`)
 - `./.jjx/socket` (Pebble API Unix socket, bind-mounted into both the workload and charm runner containers)
+- `./.jjx/<app>.<pid>.deploy` (marker files for in-flight background pebble-ready processes; created by deploy, deleted by the process on completion or by teardown)
 
 `jjx` also caches the Pebble binary at `~/.cache/jjx/pebble-bin`, downloaded from canonical/pebble GitHub Releases on first use. This cache is shared across projects and persists across model teardowns to enable reuse across multiple deployments.
 
@@ -112,7 +113,7 @@ Notes on generated runtime files:
 - `JJX_STATE_DIR` is set to `/jjx` (the in-container mount point of `.jjx/`) in the charm runner environment. Hook tools call back into `jjx` to read and write state; this env var lets them locate state directly.
 - `./.jjx/charm/.unit-state.db` is created by charm runtime state persistence (written by `ops` via `sqlite3` to `JUJU_CHARM_DIR/.unit-state.db`, which inside the charm runner is `/charm/.unit-state.db`).
 
-When the model is torn down, jjx removes the entire `./.jjx/` directory. The `~/.cache/jjx/pebble-bin` cache is kept for reuse across subsequent deployments.
+When the model is torn down, jjx kills any background pebble-ready processes (via `.deploy` marker files), then removes the entire `./.jjx/` directory. The `~/.cache/jjx/pebble-bin` cache is kept for reuse across subsequent deployments.
 
 ### charm runner container
 
@@ -133,7 +134,7 @@ The charm runner is a persistent Docker container that executes charm hooks.
 
 **Environment**: The charm runner container is started with `PYTHONPATH` set to `/venv/lib/python3.XX/site-packages:/jjx-src:/charm/lib`. However, `docker exec` does not inherit environment variables from `docker run`, so `jjx` passes `PATH` and `PYTHONPATH` explicitly via `docker exec -e` for each hook execution. This ensures both the charm process and its hook tool subprocesses can find `jjx` and the hook tools.
 
-**Pebble socket**: A symlink is created inside the charm runner at `/charm/containers/<workload>/pebble.socket` → `/jjx/socket`, so `ops` can find the Pebble socket at the path it expects. The symlink and parent directory are created via Python (`pathlib.Path.mkdir` + `os.symlink`) because the charm runner image has no `mkdir` or `ln` in PATH. The symlink is **not** created at container startup — it is created during the deploy event flow, between `config-changed` and `pebble-ready` (see deploy flow below). This models real Juju, where `config-changed` fires before the workload container has started, so the charm cannot reach Pebble yet. The charm's `_replan_workload` hits a `ConnectionError` and returns early, just like it does in real Juju.
+**Pebble socket**: A symlink is created inside the charm runner at `/charm/containers/<workload>/pebble.socket` → `/jjx/socket`, so `ops` can find the Pebble socket at the path it expects. The symlink and parent directory are created via Python (`pathlib.Path.mkdir` + `os.symlink`) because the charm runner image has no `mkdir` or `ln` in PATH. The symlink is **not** created at container startup or during `config-changed` — it is created by the background pebble-ready subprocess, after the minimum deploy delay (see "async pebble-ready" below). This models real Juju, where `config-changed` fires before the workload container has started, so the charm cannot reach Pebble yet. The charm's `_replan_workload` hits a `ConnectionError` and returns early, just like it does in real Juju.
 
 **Entrypoint**: The container runs `python -c 'import time; time.sleep(999999)'` — it stays alive doing nothing. Charm hooks are executed via `docker exec`.
 
@@ -164,9 +165,31 @@ Deploy flow:
 5. wait for Pebble socket (`/jjx/socket`) to be connectable inside charm runner
 6. generate hook tool scripts in `./.jjx/hook-tools/` (Python scripts with `#!/python/bin/python3.XX` shebangs)
 7. run `config-changed` hook via `docker exec` into charm runner (Pebble socket symlink does **not** exist yet — charm cannot reach Pebble, matching real Juju)
-8. create Pebble socket symlink inside charm runner (via Python, not `mkdir`/`ln`) — Pebble is now accessible from the charm
-9. run `<workload>-pebble-ready` hook via `docker exec` into charm runner
-10. persist resulting app and unit status
+8. persist resulting app and unit status
+9. spawn a detached background subprocess (see "async pebble-ready" below) and return
+
+The background subprocess:
+
+1. sleep for 3.0 seconds (the minimum deploy delay)
+2. create Pebble socket symlink inside charm runner (via Python, not `mkdir`/`ln`) — Pebble is now accessible from the charm
+3. run `<workload>-pebble-ready` hook via `docker exec` into charm runner
+4. persist resulting app and unit status
+5. delete the `.jjx/<app>.<pid>.deploy` marker file and exit
+
+### async pebble-ready
+
+`pebble-ready` is dispatched asynchronously after a minimum 3.0-second delay.
+This is a deliberate stress-test floor, not a model of real Juju latency. It
+exposes integration tests that use `jubilant.wait` (which needs 3 consecutive
+successful status checks at 1.0s intervals — minimum ~2.0s) and then proceed
+to interact with the container without verifying that `pebble-ready` has
+actually fired. The delay is not configurable; the floor must be guaranteed.
+
+The background subprocess is tracked via a `.jjx/<app>.<pid>.deploy` marker
+file (not in `state.json`) so teardown can find and kill it. State writes are
+atomic (temp file + `os.replace`) to prevent torn JSON if a `juju status` read
+overlaps a background write. No file locking — a flock around event dispatch
+would deadlock on hook tool subprocesses.
 
 Config flow:
 
@@ -176,17 +199,18 @@ Config flow:
 
 Destroy flow:
 
-1. stop and remove postgres containers (if any)
-2. stop and remove workload containers
-3. stop and remove charm runner containers (last)
-4. remove `./.jjx/` directory
+1. kill any background pebble-ready processes (via `.jjx/*.deploy` marker files)
+2. stop and remove postgres containers (if any)
+3. stop and remove workload containers
+4. stop and remove charm runner containers (last)
+5. remove `./.jjx/` directory
 
 ## behavior guarantees
 
 - real `ops` framework (`ops` 3.x)
 - real Pebble API surface through Unix socket
 - hook tools invoked as subprocess executables
-- synchronous event execution (no queue, no background agent)
+- synchronous event execution (no queue, no background agent), except `pebble-ready` which is dispatched asynchronously after a minimum 3.0s delay (see "async pebble-ready" above)
 - deterministic single-unit semantics
 - charm code that connects to loopback addresses (`127.0.0.1`, `localhost`, `::1`) reaches the workload container without exposing container ports on the host (the charm runner shares the workload's network namespace)
 

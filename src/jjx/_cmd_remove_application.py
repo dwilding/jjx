@@ -21,6 +21,10 @@ def remove_application(args: list[str], model: str | None) -> int:
     if not app_name:
         raise _engine.CliError("usage: juju remove-application <app>")
 
+    # Kill this app's background pebble-ready process before removing its
+    # containers.
+    _engine._kill_background_processes(app_name=app_name)
+
     app_state = model_state.get("apps", {}).pop(app_name, None)
     if app_state is None:
         return 0

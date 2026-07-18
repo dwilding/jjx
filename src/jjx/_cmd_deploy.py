@@ -264,7 +264,11 @@ def deploy(args: list[str], model: str | None) -> int:
     _engine._save_state(state)
 
     try:
-        _engine._run_deploy_event_flow(model_name, app_name, workload)
+        # Run config-changed synchronously so the charm can set status before
+        # the test's wait() starts polling. Pebble-ready is dispatched
+        # asynchronously after a minimum delay (see _spawn_background_pebble_ready).
+        _engine._run_config_changed_event(model_name, app_name)
+        _engine._spawn_background_pebble_ready(model_name, app_name, workload)
     except Exception:
         state = _engine._load_state()
         app_state = state.get("models", {}).get(model_name, {}).get("apps", {}).get(app_name)

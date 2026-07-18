@@ -15,7 +15,33 @@ JUJU = [
 ]
 
 
-def assert_one_process() -> None:
+def assert_container() -> None:
+    command = [
+        "docker",
+        "inspect",
+        "jjx-default-fastapi-demo",
+    ]
+    subprocess.run(
+        command,
+        check=True,
+    )
+
+
+def assert_no_container() -> None:
+    command = [
+        "docker",
+        "inspect",
+        "jjx-default-fastapi-demo",
+    ]
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 1
+
+
+def assert_process_count(count: int) -> None:
     command = [
         "docker",
         "top",
@@ -29,7 +55,7 @@ def assert_one_process() -> None:
     assert result.returncode == 0, (
         f"docker top exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
-    assert result.stdout.count("uvicorn") == 1
+    assert result.stdout.count("uvicorn") == count
 
 
 def assert_server_state(port: int, expect_up: bool) -> None:
@@ -63,7 +89,7 @@ def get_container_ip() -> str:
     return result.stdout.strip()
 
 
-def test_server_process(k8s_2_configurable):
+def test_container_processes(k8s_2_configurable):
     # Clean up any deployed apps from previous tests.
     command = [
         "docker",
@@ -75,7 +101,6 @@ def test_server_process(k8s_2_configurable):
         command,
         check=False,  # Ignore a missing container (good enough for now).
     )
-    # "Pack" the charm.
     (k8s_2_configurable / "placeholder.charm").touch()
     # Deploy the app.
     command = [
@@ -91,22 +116,35 @@ def test_server_process(k8s_2_configurable):
         cwd=k8s_2_configurable,
         check=True,
     )
-    # Wait for the app to be active.
+    # Wait for the container to be running.
+    deadline = time.monotonic() + 10.0
+    while time.monotonic() < deadline:
+        try:
+            assert_container()
+        except subprocess.CalledProcessError:
+            time.sleep(0.5)
+            continue
+        break
+    else:
+        raise AssertionError("container did not start")
+    # Check that there are no server processes (pebble-ready fires after a delay).
+    assert_process_count(0)
+    # Wait for the charm to be active (happens after pebble-ready fires).
     command = [
         *JUJU,
         "wait-for",
         "application",
         "fastapi-demo",
         "--timeout",
-        "2s",
+        "10s",
     ]
     subprocess.run(
         command,
         cwd=k8s_2_configurable,
         check=True,
     )
-    # Check that there's one server process in the container.
-    assert_one_process()
+    # Check that there's now one server process.
+    assert_process_count(1)
 
 
 def test_pebble_was_unreachable(k8s_2_configurable):
@@ -203,7 +241,7 @@ def test_server_changes_port(k8s_2_configurable):
     )
     time.sleep(2)
     # Check that there's still one server process in the container.
-    assert_one_process()
+    assert_process_count(1)
     # Check that the server doesn't respond on the old port.
     assert_server_state(port, False)
     # Check that the server responds on the new port.
@@ -224,14 +262,4 @@ def test_teardown_container(k8s_2_configurable):
     )
     time.sleep(2)
     # Check that the container doesn't exist.
-    command = [
-        "docker",
-        "inspect",
-        "jjx-default-fastapi-demo",
-    ]
-    result = subprocess.run(
-        command,
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 1
+    assert_no_container()
