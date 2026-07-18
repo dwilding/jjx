@@ -23,27 +23,27 @@ _VIRTUAL_CHARMS = {
 }
 
 
-_DOCKER_PUBLISH_RE = re.compile(r"^(?P<host_port>\d{1,5}):(?P<container_port>\d{1,5})$")
+_PUBLISH_RE = re.compile(r"^(?P<host_port>\d{1,5}):(?P<container_port>\d{1,5})$")
 
 
-def _parse_docker_publish(raw: str) -> str:
-    match = _DOCKER_PUBLISH_RE.fullmatch(raw)
+def _parse_publish(raw: str) -> str:
+    match = _PUBLISH_RE.fullmatch(raw)
     if not match:
-        raise _engine.CliError("JJX_DOCKER_PUBLISH must be in HOST_PORT:CONTAINER_PORT format")
+        raise _engine.CliError("JJX_PUBLISH must be in HOST_PORT:CONTAINER_PORT format")
 
     host_port = int(match.group("host_port"))
     container_port = int(match.group("container_port"))
     if not (1 <= host_port <= 65535 and 1 <= container_port <= 65535):
-        raise _engine.CliError("JJX_DOCKER_PUBLISH ports must be between 1 and 65535")
+        raise _engine.CliError("JJX_PUBLISH ports must be between 1 and 65535")
 
     return f"127.0.0.1:{host_port}:{container_port}"
 
 
-def _docker_publish_from_env() -> str | None:
-    raw = os.environ.get("JJX_DOCKER_PUBLISH", "").strip()
+def _publish_from_env() -> str | None:
+    raw = os.environ.get("JJX_PUBLISH", "").strip()
     if not raw:
         return None
-    return _parse_docker_publish(raw)
+    return _parse_publish(raw)
 
 
 def _copy_image_pebble_layers(image: str, dest_layers_dir: Path) -> None:
@@ -63,7 +63,7 @@ def _copy_image_pebble_layers(image: str, dest_layers_dir: Path) -> None:
     container_name = f"jjx-layer-copy-{uuid.uuid4().hex[:8]}"
     try:
         subprocess.run(
-            ["docker", "create", "--name", container_name, image, "true"],
+            [_engine._CONTAINER_BINARY, "create", "--name", container_name, image, "true"],
             capture_output=True,
             text=True,
         )
@@ -71,7 +71,7 @@ def _copy_image_pebble_layers(image: str, dest_layers_dir: Path) -> None:
         # Non-zero exit just means the image has no layers directory — that's fine.
         subprocess.run(
             [
-                "docker",
+                _engine._CONTAINER_BINARY,
                 "cp",
                 f"{container_name}:/var/lib/pebble/default/layers/.",
                 str(dest_layers_dir),
@@ -81,7 +81,7 @@ def _copy_image_pebble_layers(image: str, dest_layers_dir: Path) -> None:
         )
     finally:
         subprocess.run(
-            ["docker", "rm", "--force", container_name],
+            [_engine._CONTAINER_BINARY, "rm", "--force", container_name],
             capture_output=True,
             text=True,
         )
@@ -230,7 +230,7 @@ def deploy(args: list[str], model: str | None) -> int:
         (str(pebble_binary), "/charm/bin/pebble", True),
         (str(jjx_dir), "/jjx", False),
     ]
-    publish = _docker_publish_from_env()
+    publish = _publish_from_env()
     container_id = _engine._docker_run(
         image,
         container_name,
@@ -242,7 +242,8 @@ def deploy(args: list[str], model: str | None) -> int:
             "PEBBLE_SOCKET": "/jjx/socket",
             "PYTHONPATH": "/",
         },
-        user=f"{os.getuid()}:{os.getgid()}",
+        user=_engine._container_user(),
+        network="bridge",
         workdir="/plan",
         entrypoint="/charm/bin/pebble",
         command=["run", "--create-dirs"],

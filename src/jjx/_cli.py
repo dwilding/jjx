@@ -229,16 +229,16 @@ def jjx_cli() -> int:
 
     detach = "-d" in jjx_args
 
-    # Extract -p flag for Docker port publishing.
-    docker_publish = None
+    # Extract -p flag for port publishing.
+    publish = None
     publish_output = ""
     if "-p" in jjx_args:
         idx = jjx_args.index("-p")
         if idx + 1 < len(jjx_args):
-            docker_publish = jjx_args[idx + 1]
-            if not re.match(r"^\d+:\d+$", docker_publish):
+            publish = jjx_args[idx + 1]
+            if not re.match(r"^\d+:\d+$", publish):
                 sys.stderr.write(
-                    f"ERROR: Invalid port format '{docker_publish}': expected <number>:<number>\n"
+                    f"ERROR: Invalid port format '{publish}': expected <number>:<number>\n"
                 )
                 return 2
 
@@ -264,9 +264,9 @@ def jjx_cli() -> int:
     # at the launcher's venv; if inherited, uv may reuse it instead of creating
     # one in the charm dir, causing pytest to run from the wrong project root.
     env.pop("VIRTUAL_ENV", None)
-    if docker_publish:
-        env["JJX_DOCKER_PUBLISH"] = docker_publish
-        external_port, internal_port = docker_publish.split(":", 1)
+    if publish:
+        env["JJX_PUBLISH"] = publish
+        external_port, internal_port = publish.split(":", 1)
         publish_output = (
             f"\n\nPublished container port {internal_port} to 127.0.0.1:{external_port}"
         )

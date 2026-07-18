@@ -15,14 +15,13 @@ from __future__ import annotations
 import json
 import secrets
 import string
-import subprocess
 import time
 from typing import Any
 
 from . import _engine
 
 
-POSTGRES_IMAGE = "postgres:16"
+POSTGRES_IMAGE = "docker.io/library/postgres:16"
 POSTGRES_PORT = 5432
 
 
@@ -37,16 +36,7 @@ def _generate_username() -> str:
 
 def _docker_exec(container_name: str, command: list[str], timeout: float = 30.0) -> str:
     """Run a command inside a container and return stdout."""
-    cmd = ["docker", "exec", container_name, *command]
-    try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=True)
-    except subprocess.CalledProcessError as exc:
-        raise _engine.CliError(
-            f"docker exec failed in {container_name}: {exc.stderr.strip() or exc.stdout.strip()}"
-        ) from None
-    except subprocess.TimeoutExpired as exc:
-        raise _engine.CliError(f"docker exec timed out in {container_name}: {exc}") from None
-    return proc.stdout
+    return _engine._docker_exec(container_name, command, timeout=timeout, check=True).stdout
 
 
 def _wait_for_postgres(container_name: str, database_name: str, timeout: float = 60.0) -> None:
