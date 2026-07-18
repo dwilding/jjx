@@ -38,7 +38,11 @@ PEBBLE_RELEASES_DOWNLOAD = "https://github.com/canonical/pebble/releases/downloa
 # Charm runner container image. This is a chiseled Ubuntu image that contains
 # only the runtime libraries (glibc, libssl, libz, ca-certs) needed to run
 # Python. No shell, no Python, no Pebble — everything is bind-mounted.
-CHARM_RUNNER_IMAGE = "ubuntu/dotnet-deps:8.0-24.04_stable"
+CHARM_RUNNER_IMAGE = "docker.io/ubuntu/dotnet-deps:8.0-24.04_stable"
+
+# The container runtime binary. Currently always "docker"; the future podman
+# PR will make this configurable (env var or detection).
+_CONTAINER_BINARY = "docker"
 
 
 @dataclass
@@ -276,6 +280,16 @@ def _sanitize_container_name(name: str) -> str:
     return safe[:128]
 
 
+def _container_user() -> str:
+    """Return the ``--user`` value for container startup.
+
+    Docker: run as the host user so files written to bind-mounted volumes are
+    owned by the host user. Podman rootless will override this to ``"0:0"``
+    (container root maps to the host user).
+    """
+    return f"{os.getuid()}:{os.getgid()}"
+
+
 def _split_resource(raw: str) -> tuple[str, str]:
     if "=" not in raw:
         raise CliError(f"invalid --resource value: {raw}")
@@ -340,7 +354,7 @@ def _docker_run(
     network: str | None = None,
 ) -> str:
     cmd = [
-        "docker",
+        _CONTAINER_BINARY,
         "run",
         "--detach",
         "--restart",
@@ -387,7 +401,7 @@ def _docker_run(
 
 def _docker_rm(container_name: str) -> None:
     subprocess.run(
-        ["docker", "rm", "--force", container_name],
+        [_CONTAINER_BINARY, "rm", "--force", container_name],
         capture_output=True,
         text=True,
     )
@@ -397,7 +411,7 @@ def _docker_rm(container_name: str) -> None:
     deadline = time.monotonic() + 10.0
     while time.monotonic() < deadline:
         result = subprocess.run(
-            ["docker", "inspect", "--format", "{{.State.Status}}", container_name],
+            [_CONTAINER_BINARY, "inspect", "--format", "{{.State.Status}}", container_name],
             capture_output=True,
             text=True,
         )
@@ -412,7 +426,7 @@ def _docker_container_details(container_name: str) -> ContainerDetails:
     try:
         proc = subprocess.run(
             [
-                "docker",
+                _CONTAINER_BINARY,
                 "inspect",
                 "--format",
                 "{{.Name}}|{{.State.Running}}|{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
@@ -478,7 +492,7 @@ def _docker_list_model_containers(model_name: str) -> list[str]:
     model_prefix = _sanitize_container_name(f"{model_name}-")
     try:
         proc = subprocess.run(
-            ["docker", "ps", "--all", "--format", "{{.Names}}"],
+            [_CONTAINER_BINARY, "ps", "--all", "--format", "{{.Names}}"],
             check=True,
             capture_output=True,
             text=True,
@@ -631,7 +645,7 @@ def _charm_runner_name(model_name: str) -> str:
 def _ensure_charm_runner_image() -> None:
     """Pull the charm runner image if it is not present locally."""
     result = subprocess.run(
-        ["docker", "image", "inspect", CHARM_RUNNER_IMAGE],
+        [_CONTAINER_BINARY, "image", "inspect", CHARM_RUNNER_IMAGE],
         capture_output=True,
         text=True,
     )
@@ -640,7 +654,7 @@ def _ensure_charm_runner_image() -> None:
     print(f"Pulling charm runner image {CHARM_RUNNER_IMAGE} ...", flush=True)
     try:
         subprocess.run(
-            ["docker", "pull", CHARM_RUNNER_IMAGE],
+            [_CONTAINER_BINARY, "pull", CHARM_RUNNER_IMAGE],
             check=True,
             capture_output=True,
             text=True,
@@ -710,7 +724,7 @@ def _start_charm_runner(
             "PYTHONPATH": container_pythonpath,
             "TERM": "dumb",
         },
-        user=f"{os.getuid()}:{os.getgid()}",
+        user=_container_user(),
         workdir="/charm",
         entrypoint=container_python,
         command=["-c", "import time; time.sleep(999999)"],
@@ -749,7 +763,7 @@ def _docker_exec(
     check: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     """Run a command inside a container via ``docker exec``."""
-    cmd = ["docker", "exec"]
+    cmd = [_CONTAINER_BINARY, "exec"]
     for key, value in (env or {}).items():
         cmd.extend(["-e", f"{key}={value}"])
     cmd.append(container_name)
@@ -780,7 +794,7 @@ def _wait_for_charm_runner_socket(
     while time.monotonic() < deadline:
         result = subprocess.run(
             [
-                "docker",
+                _CONTAINER_BINARY,
                 "exec",
                 charm_runner_name,
                 container_python,

@@ -119,7 +119,7 @@ When the model is torn down, jjx kills any background pebble-ready processes (vi
 
 The charm runner is a persistent Docker container that executes charm hooks.
 
-**Image**: `ubuntu/dotnet-deps:8.0-24.04_stable` — a chiseled Ubuntu image containing only the runtime libraries (glibc, libssl, libz, ca-certs) needed to run Python. No shell, no coreutils, no Python, no Pebble — everything is bind-mounted from the host. Because there is no `/bin/sh`, hook tool scripts use a direct Python shebang (`#!/python/bin/python3.XX`) rather than `#!/bin/sh`.
+**Image**: `docker.io/ubuntu/dotnet-deps:8.0-24.04_stable` — a chiseled Ubuntu image containing only the runtime libraries (glibc, libssl, libz, ca-certs) needed to run Python. No shell, no coreutils, no Python, no Pebble — everything is bind-mounted from the host. Because there is no `/bin/sh`, hook tool scripts use a direct Python shebang (`#!/python/bin/python3.XX`) rather than `#!/bin/sh`.
 
 **Naming**: `<model>-operator` (e.g. `jjx-default-operator`). Like the postgres container naming, this uses a fixed suffix with no app name.
 
@@ -159,8 +159,8 @@ Deploy flow:
 
 1. ensure `./.jjx` exists and load state
 2. stage runtime charm files in `./.jjx/charm/` (`src/`, `metadata.yaml`, `config.yaml`)
-3. start workload container and Pebble on Docker bridge networking (no host networking)
-   - if `JJX_DOCKER_PUBLISH` is set to `HOST_PORT:CONTAINER_PORT`, add Docker publish `127.0.0.1:HOST_PORT:CONTAINER_PORT`
+3. start workload container and Pebble with explicit `--network bridge` (no host networking)
+   - if `JJX_PUBLISH` is set to `HOST_PORT:CONTAINER_PORT`, add port publish `127.0.0.1:HOST_PORT:CONTAINER_PORT`
 4. start charm runner container (`--network=container:<workload>`, bind-mounts for Python, venv, jjx source, charm dir, state dir)
 5. wait for Pebble socket (`/jjx/socket`) to be connectable inside charm runner
 6. generate hook tool scripts in `./.jjx/hook-tools/` (Python scripts with `#!/python/bin/python3.XX` shebangs)
