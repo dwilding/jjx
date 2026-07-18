@@ -45,8 +45,14 @@ def test_deploy(charm: pathlib.Path, juju: jubilant.Juju):
 
 def test_workload_version_is_set(charm: pathlib.Path, juju: jubilant.Juju):
     """Verify that the workload version has been set."""
+    expected_version = "1.0.4"  # Hardcoded for simplicity.
+    juju.wait(lambda status: status.apps[APP_NAME].version == expected_version)
+
+
+def test_workload_version_direct(charm: pathlib.Path, juju: jubilant.Juju):
+    """Verify that integration tests can talk directly to the application."""
+    expected_version = "1.0.4"
     unit_ip = juju.status().apps[APP_NAME].units[f"{APP_NAME}/0"].address
     response = urllib.request.urlopen(f"http://{unit_ip}:8000/version")
     data = json.loads(response.read())
-    version = data["version"]
-    assert version == "1.0.4"  # Hardcoded for simplicity.
+    assert data["version"] == expected_version
