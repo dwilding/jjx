@@ -61,7 +61,7 @@ def test_charm_with_postgres(k8s_4_action):
     # Check that the workload can talk to the database.
     # This isn't covered by the charm's integration tests.
     api_base = "http://127.0.0.1:8135"
-    response = urllib.request.urlopen(f"{api_base}/names")
+    response = urllib.request.urlopen(f"{api_base}/names", timeout=10)
     assert json.loads(response.read()) == {"names": {}}
     urllib.request.urlopen(
         urllib.request.Request(
@@ -69,9 +69,10 @@ def test_charm_with_postgres(k8s_4_action):
             data=b"name=elephant",
             headers={"Content-Type": "application/x-www-form-urlencoded"},
             method="POST",
-        )
+        ),
+        timeout=10,
     )
-    response = urllib.request.urlopen(f"{api_base}/names")
+    response = urllib.request.urlopen(f"{api_base}/names", timeout=10)
     assert json.loads(response.read()) == {"names": {"1": "elephant"}}
     # Tear down both containers.
     command = [
