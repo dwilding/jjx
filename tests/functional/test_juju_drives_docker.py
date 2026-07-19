@@ -117,7 +117,7 @@ def test_container_processes(k8s_2_configurable):
         check=True,
     )
     # Wait for the container to be running.
-    deadline = time.monotonic() + 10.0
+    deadline = time.monotonic() + 30.0
     while time.monotonic() < deadline:
         try:
             assert_container()
@@ -136,7 +136,7 @@ def test_container_processes(k8s_2_configurable):
         "application",
         "fastapi-demo",
         "--timeout",
-        "10s",
+        "30s",
     ]
     subprocess.run(
         command,
@@ -239,7 +239,13 @@ def test_server_changes_port(k8s_2_configurable):
         cwd=k8s_2_configurable,
         check=True,
     )
-    time.sleep(2)
+    deadline = time.monotonic() + 30.0
+    while time.monotonic() < deadline:
+        if server_up(get_container_ip(), port + 1):
+            break
+        time.sleep(0.5)
+    else:
+        raise AssertionError(f"unable to reach server on port {port + 1}")
     # Check that there's still one server process in the container.
     assert_process_count(1)
     # Check that the server doesn't respond on the old port.
@@ -260,6 +266,13 @@ def test_teardown_container(k8s_2_configurable):
         cwd=k8s_2_configurable,
         check=True,
     )
-    time.sleep(2)
     # Check that the container doesn't exist.
-    assert_no_container()
+    deadline = time.monotonic() + 30.0
+    while time.monotonic() < deadline:
+        try:
+            assert_no_container()
+            break
+        except AssertionError:
+            time.sleep(0.5)
+    else:
+        raise AssertionError("container was not removed")

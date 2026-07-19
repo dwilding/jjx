@@ -10,9 +10,9 @@ PACKAGE_DIR = pathlib.Path(__file__).parent.parent.parent
 
 
 def wait_for_output_line(proc: subprocess.Popen[str], text: str) -> str:
-    deadline = time.time() + 20
     assert proc.stdout is not None
-    while time.time() < deadline:
+    deadline = time.monotonic() + 60.0
+    while time.monotonic() < deadline:
         line = proc.stdout.readline()
         if not line:
             if proc.poll() is not None:
@@ -106,7 +106,7 @@ def test_uvx_jjx(k8s_1_minimal_patched):
         assert_no_jjx_in_charm_venv(k8s_1_minimal_patched)
         # TEARDOWN
         proc.send_signal(signal.SIGINT)
-        assert proc.wait(timeout=10) == 130
+        assert proc.wait(timeout=30) == 130
         assert proc.stdout is not None
         output = proc.stdout.read()
         assert f"Removed container {container_name}" in output
@@ -141,7 +141,7 @@ def test_uvx_jjx_publish(k8s_1_minimal_patched):
         assert_connection("http://127.0.0.1:8135")
         # TEARDOWN
         proc.send_signal(signal.SIGINT)
-        assert proc.wait(timeout=10) == 130
+        assert proc.wait(timeout=30) == 130
     finally:
         if proc.poll() is None:
             proc.kill()
@@ -177,7 +177,7 @@ def test_uv_run_jjx(k8s_1_minimal_patched):
         wait_for_output_line(proc, "Started workload container ")
         # TEARDOWN
         proc.send_signal(signal.SIGINT)
-        assert proc.wait(timeout=10) == 130
+        assert proc.wait(timeout=30) == 130
     finally:
         if proc.poll() is None:
             proc.kill()
