@@ -3,6 +3,9 @@ import time
 import subprocess
 import urllib.request
 
+import jjx
+import helpers_functional as helpers
+
 PACKAGE_DIR = pathlib.Path(__file__).parent.parent.parent
 JUJU = [
     "uv",
@@ -13,39 +16,15 @@ JUJU = [
     PACKAGE_DIR,
     "juju",
 ]
-
-
-def assert_container() -> None:
-    command = [
-        "docker",
-        "inspect",
-        "jjx-default-fastapi-demo",
-    ]
-    subprocess.run(
-        command,
-        check=True,
-    )
-
-
-def assert_no_container() -> None:
-    command = [
-        "docker",
-        "inspect",
-        "jjx-default-fastapi-demo",
-    ]
-    result = subprocess.run(
-        command,
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 1
+CONTAINER_NAME = "jjx-default-fastapi-demo"
 
 
 def assert_process_count(count: int) -> None:
+    runtime = jjx.container_runtime()
     command = [
-        "docker",
+        runtime,
         "top",
-        "jjx-default-fastapi-demo",
+        CONTAINER_NAME,
     ]
     result = subprocess.run(
         command,
@@ -53,13 +32,13 @@ def assert_process_count(count: int) -> None:
         text=True,
     )
     assert result.returncode == 0, (
-        f"docker top exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        f"'{runtime} top' exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
     assert result.stdout.count("uvicorn") == count
 
 
 def assert_server_state(port: int, expect_up: bool) -> None:
-    assert server_up(get_container_ip(), port) == expect_up
+    assert server_up(helpers.container_ip(CONTAINER_NAME), port) == expect_up
 
 
 def server_up(ip: str, port: int) -> bool:
@@ -71,31 +50,13 @@ def server_up(ip: str, port: int) -> bool:
     return response.status == 200
 
 
-def get_container_ip() -> str:
-    result = subprocess.run(
-        [
-            "docker",
-            "inspect",
-            "--format",
-            "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
-            "jjx-default-fastapi-demo",
-        ],
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0, (
-        f"docker inspect exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-    )
-    return result.stdout.strip()
-
-
 def test_container_processes(k8s_2_configurable):
     # Clean up any deployed apps from previous tests.
     command = [
-        "docker",
+        jjx.container_runtime(),
         "rm",
         "--force",
-        "jjx-default-fastapi-demo",
+        CONTAINER_NAME,
     ]
     subprocess.run(
         command,
@@ -120,7 +81,7 @@ def test_container_processes(k8s_2_configurable):
     deadline = time.monotonic() + 30.0
     while time.monotonic() < deadline:
         try:
-            assert_container()
+            helpers.assert_container(CONTAINER_NAME)
         except subprocess.CalledProcessError:
             time.sleep(0.5)
             continue
@@ -170,10 +131,11 @@ def test_pebble_was_unreachable(k8s_2_configurable):
 
 
 def test_pebble_services():
+    runtime = jjx.container_runtime()
     command = [
-        "docker",
+        runtime,
         "exec",
-        "jjx-default-fastapi-demo",
+        CONTAINER_NAME,
         "/charm/bin/pebble",
         "services",
     ]
@@ -183,16 +145,17 @@ def test_pebble_services():
         text=True,
     )
     assert result.returncode == 0, (
-        f"docker exec exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        f"'{runtime} exec' exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
     assert "fastapi-service" in result.stdout
 
 
 def test_pebble_logs():
+    runtime = jjx.container_runtime()
     command = [
-        "docker",
+        runtime,
         "exec",
-        "jjx-default-fastapi-demo",
+        CONTAINER_NAME,
         "/charm/bin/pebble",
         "logs",
         "fastapi-service",
@@ -203,7 +166,7 @@ def test_pebble_logs():
         text=True,
     )
     assert result.returncode == 0, (
-        f"docker exec exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        f"'{runtime} exec' exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
     assert "Uvicorn running" in result.stdout
 
@@ -241,7 +204,7 @@ def test_server_changes_port(k8s_2_configurable):
     )
     deadline = time.monotonic() + 30.0
     while time.monotonic() < deadline:
-        if server_up(get_container_ip(), port + 1):
+        if server_up(helpers.container_ip(CONTAINER_NAME), port + 1):
             break
         time.sleep(0.5)
     else:
@@ -270,7 +233,7 @@ def test_teardown_container(k8s_2_configurable):
     deadline = time.monotonic() + 30.0
     while time.monotonic() < deadline:
         try:
-            assert_no_container()
+            helpers.assert_no_container(CONTAINER_NAME)
             break
         except AssertionError:
             time.sleep(0.5)

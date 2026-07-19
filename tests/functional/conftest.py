@@ -5,6 +5,8 @@ import subprocess
 
 import pytest
 
+import jjx
+
 PACKAGE_DIR = pathlib.Path(__file__).parent.parent.parent
 CHARMS_DIR = pathlib.Path(__file__).parent / "charms"
 CHARM_PARAMS = [
@@ -31,17 +33,16 @@ def uv_no_config():
 
 @pytest.fixture(scope="session", autouse=True)
 def system_ready():
-    assert shutil.which("docker") is not None, "docker CLI is not installed"
+    runtime = jjx.container_runtime()
+    assert shutil.which(runtime) is not None, f"unable to find {runtime} binary"
     command = [
-        "docker",
+        runtime,
         "ps",
     ]
-    result = subprocess.run(
+    subprocess.run(
         command,
-        capture_output=True,
-        text=True,
+        check=True,
     )
-    assert result.returncode == 0, result.stderr.strip() or "cannot access docker daemon"
     yield
 
 

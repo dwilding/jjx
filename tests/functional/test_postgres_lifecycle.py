@@ -3,33 +3,9 @@ import pathlib
 import subprocess
 import urllib.request
 
+import helpers_functional as helpers
+
 PACKAGE_DIR = pathlib.Path(__file__).parent.parent.parent
-
-
-def assert_container(container_name: str) -> None:
-    command = [
-        "docker",
-        "inspect",
-        container_name,
-    ]
-    subprocess.run(
-        command,
-        check=True,
-    )
-
-
-def assert_no_container(container_name: str) -> None:
-    command = [
-        "docker",
-        "inspect",
-        container_name,
-    ]
-    result = subprocess.run(
-        command,
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 1
 
 
 def test_charm_with_postgres(k8s_4_action):
@@ -55,9 +31,9 @@ def test_charm_with_postgres(k8s_4_action):
     container_name = f"{model_name}-test-charm-fastapi-demo"
     operator_container_name = f"{model_name}-test-charm-operator"
     postgres_container_name = f"{model_name}-test-charm-postgres"
-    assert_container(container_name)
-    assert_container(operator_container_name)
-    assert_container(postgres_container_name)
+    helpers.assert_container(container_name)
+    helpers.assert_container(operator_container_name)
+    helpers.assert_container(postgres_container_name)
     # Check that the workload can talk to the database.
     # This isn't covered by the charm's integration tests.
     api_base = "http://127.0.0.1:8135"
@@ -94,6 +70,6 @@ def test_charm_with_postgres(k8s_4_action):
     assert f"Removed container {container_name}" in result.stdout
     assert f"Removed container {operator_container_name}" in result.stdout
     assert f"Removed container {postgres_container_name}" in result.stdout
-    assert_no_container(container_name)
-    assert_no_container(operator_container_name)
-    assert_no_container(postgres_container_name)
+    helpers.assert_no_container(container_name)
+    helpers.assert_no_container(operator_container_name)
+    helpers.assert_no_container(postgres_container_name)
