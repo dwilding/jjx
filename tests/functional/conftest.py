@@ -34,13 +34,15 @@ def uv_no_config():
 @pytest.fixture(scope="session", autouse=True)
 def system_ready():
     runtime = jjx.container_runtime()
-    assert shutil.which(runtime) is not None, f"{runtime} CLI is not installed"
-    result = subprocess.run(
-        [runtime, "ps"],
-        capture_output=True,
-        text=True,
+    assert shutil.which(runtime) is not None, f"unable to find {runtime} binary"
+    command = [
+        runtime,
+        "ps",
+    ]
+    subprocess.run(
+        command,
+        check=True,
     )
-    assert result.returncode == 0, result.stderr.strip() or f"cannot access {runtime} daemon"
     yield
 
 

@@ -357,7 +357,7 @@ def test_jjx_pytest_select_verbose(k8s_1_minimal_patched):
         "jjx",
         "down",
     ]
-    result = subprocess.run(
+    subprocess.run(
         command,
         cwd=k8s_1_minimal_patched,
         check=True,

@@ -16,26 +16,23 @@ JUJU = [
     PACKAGE_DIR,
     "juju",
 ]
-
 CONTAINER_NAME = "jjx-default-fastapi-demo"
 
 
-def assert_container() -> None:
-    helpers.assert_container(CONTAINER_NAME)
-
-
-def assert_no_container() -> None:
-    helpers.assert_no_container(CONTAINER_NAME)
-
-
 def assert_process_count(count: int) -> None:
+    runtime = jjx.container_runtime()
+    command = [
+        runtime,
+        "top",
+        CONTAINER_NAME,
+    ]
     result = subprocess.run(
-        [jjx.container_runtime(), "top", CONTAINER_NAME],
+        command,
         capture_output=True,
         text=True,
     )
     assert result.returncode == 0, (
-        f"top exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        f"'{runtime} top' exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
     assert result.stdout.count("uvicorn") == count
 
@@ -84,7 +81,7 @@ def test_container_processes(k8s_2_configurable):
     deadline = time.monotonic() + 30.0
     while time.monotonic() < deadline:
         try:
-            assert_container()
+            helpers.assert_container(CONTAINER_NAME)
         except subprocess.CalledProcessError:
             time.sleep(0.5)
             continue
@@ -134,8 +131,9 @@ def test_pebble_was_unreachable(k8s_2_configurable):
 
 
 def test_pebble_services():
+    runtime = jjx.container_runtime()
     command = [
-        jjx.container_runtime(),
+        runtime,
         "exec",
         CONTAINER_NAME,
         "/charm/bin/pebble",
@@ -147,14 +145,15 @@ def test_pebble_services():
         text=True,
     )
     assert result.returncode == 0, (
-        f"exec exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        f"'{runtime} exec' exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
     assert "fastapi-service" in result.stdout
 
 
 def test_pebble_logs():
+    runtime = jjx.container_runtime()
     command = [
-        jjx.container_runtime(),
+        runtime,
         "exec",
         CONTAINER_NAME,
         "/charm/bin/pebble",
@@ -167,7 +166,7 @@ def test_pebble_logs():
         text=True,
     )
     assert result.returncode == 0, (
-        f"exec exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        f"'{runtime} exec' exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
     assert "Uvicorn running" in result.stdout
 
@@ -234,7 +233,7 @@ def test_teardown_container(k8s_2_configurable):
     deadline = time.monotonic() + 30.0
     while time.monotonic() < deadline:
         try:
-            assert_no_container()
+            helpers.assert_no_container(CONTAINER_NAME)
             break
         except AssertionError:
             time.sleep(0.5)
