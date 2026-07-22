@@ -147,7 +147,7 @@ def test_pebble_services():
     assert result.returncode == 0, (
         f"'{runtime} exec' exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
-    assert "fastapi-service" in result.stdout
+    assert "fastapi" in result.stdout
 
 
 def test_pebble_logs():
@@ -158,7 +158,7 @@ def test_pebble_logs():
         CONTAINER_NAME,
         "/charm/bin/pebble",
         "logs",
-        "fastapi-service",
+        "fastapi",
     ]
     result = subprocess.run(
         command,
