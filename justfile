@@ -37,6 +37,10 @@ charms:
   pushd tests/functional/charms/k8s-4-action
   charmcraft fetch-libs
   popd
+  cp -r operator/examples/k8s-5-observe tests/functional/charms
+  pushd tests/functional/charms/k8s-5-observe
+  charmcraft fetch-libs
+  popd
   rm -rf operator
 
 [private]
