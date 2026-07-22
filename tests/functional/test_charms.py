@@ -12,11 +12,19 @@ def test_charm(charm_dir):
         "jjx",
         "-d",
     ]
-    subprocess.run(
+    result = subprocess.run(
         command,
         cwd=charm_dir,
-        check=True,
+        capture_output=True,
+        text=True,
     )
+    assert result.returncode == 0, (
+        f"jjx exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    )
+    if charm_dir.name == "k8s-5-observe":
+        assert "Grafana" in result.stdout
+        assert "Prometheus" in result.stdout
+        assert "Loki" in result.stdout
     command = [
         "uvx",
         "--with-editable",
