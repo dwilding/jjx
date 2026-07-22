@@ -283,7 +283,6 @@ def jjx_cli() -> int:
 
     # Extract -p flag for port publishing.
     publish = None
-    publish_output = ""
     if "-p" in jjx_args:
         idx = jjx_args.index("-p")
         if idx + 1 < len(jjx_args):
@@ -318,10 +317,7 @@ def jjx_cli() -> int:
     env.pop("VIRTUAL_ENV", None)
     if publish:
         env["JJX_PUBLISH"] = publish
-        external_port, internal_port = publish.split(":", 1)
-        publish_output = (
-            f"\n\nPublished container port {internal_port} to 127.0.0.1:{external_port}"
-        )
+        external_port, _ = publish.split(":", 1)
     cmd = [
         "uv",
         "run",
@@ -339,10 +335,11 @@ def jjx_cli() -> int:
         if container is None:
             teardown_all_models()
             return proc.returncode
-        print(
-            f"\nStarted workload container {container.name} with IP {container.ip_address}{publish_output}",
-            flush=True,
-        )
+        if publish:
+            workload_line = f"Workload running at 127.0.0.1:{external_port}"
+        else:
+            workload_line = f"Workload running at {container.ip_address}"
+        print(f"\n{workload_line}", flush=True)
         # List user-facing endpoints for virtual COS charms (loki, etc.)
         # so the user can interact with them directly.
         cos_lines = _cos_endpoint_lines()

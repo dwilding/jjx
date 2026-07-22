@@ -70,11 +70,12 @@ def test_uvx_jjx(k8s_1_minimal_patched):
         text=True,
     )
     try:
-        status_line = wait_for_output_line(proc, "Started workload container ")
-        _, _, rest = status_line.partition("Started workload container ")
-        container_name, _, container_ip = rest.partition(" with IP ")
-        assert container_name.endswith("-fastapi-demo")
-        operator_container_name = container_name.replace("-fastapi-demo", "-operator")
+        model_line = wait_for_output_line(proc, "--juju-model ")
+        model_name = model_line.split("--juju-model ")[1].split()[0]
+        container_name = f"{model_name}-test-charm-fastapi-demo"
+        operator_container_name = f"{model_name}-test-charm-operator"
+        status_line = wait_for_output_line(proc, "Workload running at ")
+        _, _, container_ip = status_line.partition("Workload running at ")
         assert container_ip
         assert_connection(f"http://{container_ip}:8000")
         assert_no_connection("http://127.0.0.1:8000")
@@ -85,8 +86,8 @@ def test_uvx_jjx(k8s_1_minimal_patched):
         assert proc.wait(timeout=30) == 130
         assert proc.stdout is not None
         output = proc.stdout.read()
-        assert f"Removed container {container_name}" in output
-        assert f"Removed container {operator_container_name}" in output
+        assert f"Removed {container_name}" in output
+        assert f"Removed {operator_container_name}" in output
         helpers.assert_no_container(container_name)
         helpers.assert_no_container(operator_container_name)
         assert not (k8s_1_minimal_patched / ".jjx").exists()
@@ -113,7 +114,7 @@ def test_uvx_jjx_publish(k8s_1_minimal_patched):
         text=True,
     )
     try:
-        wait_for_output_line(proc, "Published container port 8000 to 127.0.0.1:8135")
+        wait_for_output_line(proc, "Workload running at 127.0.0.1:8135")
         assert_connection("http://127.0.0.1:8135")
         # TEARDOWN
         proc.send_signal(signal.SIGINT)
@@ -150,7 +151,7 @@ def test_uv_run_jjx(k8s_1_minimal_patched):
         text=True,
     )
     try:
-        wait_for_output_line(proc, "Started workload container ")
+        wait_for_output_line(proc, "Workload running at ")
         # TEARDOWN
         proc.send_signal(signal.SIGINT)
         assert proc.wait(timeout=30) == 130
@@ -178,7 +179,7 @@ def test_jjx_detach_then_down(k8s_1_minimal_patched):
     model_name = result.stdout.split("--juju-model ")[1].split()[0]
     container_name = f"{model_name}-test-charm-fastapi-demo"
     operator_container_name = f"{model_name}-test-charm-operator"
-    assert f"Started workload container {container_name}" in result.stdout
+    assert "Workload running at " in result.stdout
     helpers.assert_container(container_name)
     helpers.assert_container(operator_container_name)
     assert not (k8s_1_minimal_patched / "placeholder.charm").exists()
@@ -198,8 +199,8 @@ def test_jjx_detach_then_down(k8s_1_minimal_patched):
     assert result.returncode == 0, (
         f"jjx down exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
-    assert f"Removed container {container_name}" in result.stdout
-    assert f"Removed container {operator_container_name}" in result.stdout
+    assert f"Removed {container_name}" in result.stdout
+    assert f"Removed {operator_container_name}" in result.stdout
     helpers.assert_no_container(container_name)
     helpers.assert_no_container(operator_container_name)
     assert not (k8s_1_minimal_patched / ".jjx").exists()
@@ -224,7 +225,7 @@ def test_jjx_detach_then_rerun(k8s_1_minimal_patched):
         text=True,
     )
     assert result.returncode == 1
-    assert "Started workload container " not in result.stdout
+    assert "Workload running at " not in result.stdout
     assert " is up" in result.stderr
     assert (k8s_1_minimal_patched / ".jjx").exists()
     # TEARDOWN
@@ -243,7 +244,7 @@ def test_jjx_detach_then_rerun(k8s_1_minimal_patched):
     assert result.returncode == 0, (
         f"jjx down exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
-    assert result.stdout.count("Removed container ") == 2
+    assert result.stdout.count("Removed ") == 2
 
 
 def test_jjx_pytest_fail(k8s_1_minimal_patched):
@@ -267,7 +268,7 @@ def test_jjx_pytest_fail(k8s_1_minimal_patched):
     )
     assert result.returncode == 1
     # The container should still be running because `test_deploy` should have passed.
-    assert "Started workload container " in result.stdout
+    assert "Workload running at " in result.stdout
     assert (k8s_1_minimal_patched / ".jjx").exists()
     # TEARDOWN
     command = [
@@ -285,7 +286,7 @@ def test_jjx_pytest_fail(k8s_1_minimal_patched):
     assert result.returncode == 0, (
         f"jjx down exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
-    assert "Removed container " in result.stdout
+    assert "Removed " in result.stdout
 
 
 def test_jjx_pytest_select(k8s_1_minimal_patched):
@@ -309,7 +310,7 @@ def test_jjx_pytest_select(k8s_1_minimal_patched):
     assert result.returncode == 0, (
         f"jjx exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
-    assert "Started workload container " in result.stdout
+    assert "Workload running at " in result.stdout
     assert (k8s_1_minimal_patched / ".jjx").exists()
     # TEARDOWN
     command = [
@@ -327,7 +328,7 @@ def test_jjx_pytest_select(k8s_1_minimal_patched):
     assert result.returncode == 0, (
         f"jjx down exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
-    assert "Removed container " in result.stdout
+    assert "Removed " in result.stdout
 
 
 def test_jjx_pytest_select_verbose(k8s_1_minimal_patched):
@@ -380,5 +381,5 @@ def test_jjx_no_deploy(k8s_1_minimal_patched):
         text=True,
     )
     assert result.returncode == 1
-    assert "Started workload container " not in result.stdout
+    assert "Workload running at " not in result.stdout
     assert not (k8s_1_minimal_patched / ".jjx").exists()

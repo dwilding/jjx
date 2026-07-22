@@ -77,7 +77,7 @@ This runs the charm's integration tests and starts a Docker container for the wo
 
 The workload stays running until you press Ctrl-C.
 
-The command output includes the IP address of the workload. You can play with the workload by connecting to this address.
+The output includes the IP address of the workload. You can play with the workload by connecting to this address.
 
 Alternatively, to play with the workload on localhost, specify a port mapping:
 

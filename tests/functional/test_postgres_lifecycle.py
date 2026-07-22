@@ -67,9 +67,9 @@ def test_charm_with_postgres(k8s_4_action):
     assert result.returncode == 0, (
         f"jjx down exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
-    assert f"Removed container {container_name}" in result.stdout
-    assert f"Removed container {operator_container_name}" in result.stdout
-    assert f"Removed container {postgres_container_name}" in result.stdout
+    assert f"Removed {container_name}" in result.stdout
+    assert f"Removed {operator_container_name}" in result.stdout
+    assert f"Removed {postgres_container_name}" in result.stdout
     helpers.assert_no_container(container_name)
     helpers.assert_no_container(operator_container_name)
     helpers.assert_no_container(postgres_container_name)

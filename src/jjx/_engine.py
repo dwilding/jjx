@@ -437,7 +437,7 @@ def _docker_rm(container_name: str) -> None:
             if not ps_result.stdout.strip():
                 break
         time.sleep(0.1)
-    print(f"Removed container {container_name}")
+    print(f"Removed {container_name}")
 
 
 def _docker_container_details(container_name: str) -> ContainerDetails:
