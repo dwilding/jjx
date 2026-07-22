@@ -408,6 +408,9 @@ def _docker_rm(container_name: str) -> None:
     # Wait for the container to be fully removed. Without this, a subsequent
     # _docker_run with the same name can race with the old container's cleanup,
     # causing issues like postgres reporting "the database system is shutting down".
+    # We check both `docker inspect` (for the container object) and `docker ps --all`
+    # (for the container listing), because `docker ps --all` can lag behind
+    # `docker inspect` briefly after `docker rm --force`.
     deadline = time.monotonic() + 10.0
     while time.monotonic() < deadline:
         result = subprocess.run(
@@ -416,8 +419,23 @@ def _docker_rm(container_name: str) -> None:
             text=True,
         )
         if result.returncode != 0:
-            # Container no longer exists.
-            break
+            # Container no longer exists according to inspect.
+            # Double-check it's also gone from `docker ps --all`.
+            ps_result = subprocess.run(
+                [
+                    _CONTAINER_BINARY,
+                    "ps",
+                    "--all",
+                    "--filter",
+                    f"name=^{container_name}$",
+                    "--format",
+                    "{{.Names}}",
+                ],
+                capture_output=True,
+                text=True,
+            )
+            if not ps_result.stdout.strip():
+                break
         time.sleep(0.1)
     print(f"Removed container {container_name}")
 

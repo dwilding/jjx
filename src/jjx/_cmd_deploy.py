@@ -13,13 +13,20 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from . import _engine, _virtual_postgres
+from . import (
+    _engine,
+    _virtual_bundle,
+    _virtual_registry,
+)
 
 
 # Charm names that jjx handles as "virtual" charms — no real charm code is
 # run; instead jjx manages the workload and relation data directly.
 _VIRTUAL_CHARMS = {
     "postgresql-k8s": "postgresql",
+    "loki-k8s": "loki",
+    "prometheus-k8s": "prometheus",
+    "grafana-k8s": "grafana",
 }
 
 
@@ -167,6 +174,10 @@ def deploy(args: list[str], model: str | None) -> int:
     if existing and existing.get("container_name"):
         _engine._docker_rm(existing["container_name"])
 
+    # Handle virtual bundles (e.g. cos-lite) — deploy multiple virtual charms.
+    if _virtual_bundle.is_virtual_bundle(charm_path):
+        return _virtual_bundle.deploy_bundle(state, model_name, charm_path)
+
     # Handle virtual charms (e.g. postgresql-k8s) — no charm code, no Pebble.
     virtual_kind = _VIRTUAL_CHARMS.get(charm_path)
     if virtual_kind is None and app_name:
@@ -295,39 +306,20 @@ def _deploy_virtual(
 ) -> int:
     """Deploy a virtual charm (no charm code, no Pebble).
 
-    For postgresql, this starts a real PostgreSQL container and records the
-    app as active in state. The relation data is populated later when
-    ``juju integrate`` is called.
+    Uses the virtual charm registry to start the workload and create the
+    app state. The relation data is populated later when ``juju integrate``
+    is called.
     """
-    model_state = state["models"][model_name]
-
-    if virtual_kind == "postgresql":
-        # The database name is fixed for now; the charm requests "names_db".
-        # We'll read it from the relation when integrate is called, but we
-        # need a default DB to create at deploy time.
-        database_name = "names_db"
-        pg_info = _virtual_postgres.start_postgres(model_name, app_name, database_name)
-        model_state["apps"][app_name] = {
-            "charm": app_name,
-            "charm_source": "",
-            "virtual": True,
-            "virtual_kind": virtual_kind,
-            "resources": {},
-            "config": {},
-            "container_name": pg_info["container_name"],
-            "container_id": pg_info["container_id"],
-            "unit": f"{app_name}/0",
-            "workload": "",
-            "pg_info": pg_info,
-            "unit_status": _engine._status_dict("active", ""),
-            "app_status": _engine._status_dict("active", ""),
-            "updated_at": _engine._now_iso(),
-        }
-        _engine._append_log(
-            model_state, f"virtual {app_name} deployed (postgres at {pg_info['ip_address']})"
-        )
-    else:
+    spec = _virtual_registry.get_spec(virtual_kind)
+    if spec is None:
         raise _engine.CliError(f"unknown virtual charm kind: {virtual_kind}")
 
+    model_state = state["models"][model_name]
+    info = spec.start(model_name, app_name)
+    model_state["apps"][app_name] = _virtual_registry.make_app_state(virtual_kind, app_name, info)
+    _engine._append_log(
+        model_state,
+        f"virtual {app_name} deployed ({virtual_kind} at {info.get('ip_address', 'no IP')})",
+    )
     _engine._save_state(state)
     return 0
