@@ -70,7 +70,7 @@ def test_container_processes(k8s_2_configurable):
         "./placeholder.charm",
         "fastapi-demo",
         "--resource",
-        "demo-server-image=ghcr.io/canonical/api_demo_server:1.0.4",
+        "demo-server-image=ghcr.io/canonical/api_demo_server/api-demo-server:2.1.0",
     ]
     subprocess.run(
         command,
