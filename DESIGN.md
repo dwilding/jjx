@@ -174,6 +174,7 @@ Deploy flow:
 1. ensure `./.jjx` exists and load state
 2. stage runtime charm files in `./.jjx/charm/` (`src/`, `metadata.yaml`, `config.yaml`)
 3. start workload container and Pebble with explicit `--network bridge` (no host networking)
+   - Pebble is started with `run --hold --create-dirs` so baked-in layers (e.g. Rockcraft layers with `startup: enabled`) do not autostart services before the charm's pebble-ready hook fires — matching real Juju, which also uses `--hold`
    - if `JJX_PUBLISH` is set to `HOST_PORT:CONTAINER_PORT`, add port publish `127.0.0.1:HOST_PORT:CONTAINER_PORT`
 4. start charm runner container (`--network=container:<workload>`, bind-mounts for Python, venv, jjx source, charm dir, state dir)
 5. wait for Pebble socket (`/jjx/socket`) to be connectable inside charm runner

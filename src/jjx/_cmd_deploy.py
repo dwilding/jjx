@@ -257,7 +257,7 @@ def deploy(args: list[str], model: str | None) -> int:
         network="bridge",
         workdir="/plan",
         entrypoint="/charm/bin/pebble",
-        command=["run", "--create-dirs"],
+        command=["run", "--hold", "--create-dirs"],
     )
     model_state["apps"][app_name]["container_id"] = container_id
 
