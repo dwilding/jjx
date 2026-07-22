@@ -50,8 +50,8 @@ __init__.py
 app.py
 database.py
 <b>pebble:/#</b> services
-<b>SERVICE</b>          <b>STARTUP</b>  <b>CURRENT</b>
-fastapi-service  enabled  active
+<b>SERVICE</b>  <b>STARTUP</b>  <b>CURRENT</b>
+fastapi  enabled  active
 </pre>
 
 For more detail, see [Command reference](https://borescope.dev/docs/reference-commands.html) in the borescope docs.
