@@ -271,7 +271,7 @@ def populate_relation(
             continue
         if spec.display_name == "Prometheus":
             prometheus_url = url
-        elif spec.display_name == "Loki":
+        elif spec.display_name == "Loki API":
             loki_url = url
 
     # Update datasources

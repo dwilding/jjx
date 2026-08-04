@@ -30,7 +30,7 @@ _vr.register(
         populate=_virtual_loki.populate_relation,
         info_key="loki_info",
         endpoints={"logging": {"interface": "loki_push_api", "role": "provides"}},
-        display_name="Loki",
+        display_name="Loki API",
         default_port=3100,
         teardown_priority=30,
     )

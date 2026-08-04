@@ -24,7 +24,7 @@ def test_charm(charm_dir):
     if charm_dir.name == "k8s-5-observe":
         assert "Grafana" in result.stdout
         assert "Prometheus" in result.stdout
-        assert "Loki" in result.stdout
+        assert "Loki API" in result.stdout
     command = [
         "uvx",
         "--with-editable",
