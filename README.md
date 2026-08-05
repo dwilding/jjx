@@ -40,7 +40,7 @@ curl http://172.17.0.2:8000/names  # returns {"names":{"1":"elephant"}}
 You might need to use a different IP address — check the output of `uvx jjx`.
 
 > [!TIP]
-> You can probe the workload using [borescope](https://github.com/tonyandrewmeyer/borescope):
+> You can use [borescope](https://github.com/tonyandrewmeyer/borescope) to probe the workload:
 >
 > ```sh
 > uvx borescope --socket .jjx/socket
@@ -126,7 +126,7 @@ To automatically include extra pytest options, use a `[tool.jjx]` table in `pypr
 
 ```toml
 [tool.jjx]
-pytest-extra-args = ["-k", "test_deploy"]
+pytest-extra-args = ["-m", "smoke"]
 ```
 
 ## How jjx works
