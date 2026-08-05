@@ -27,7 +27,7 @@ cd fastapi-demo-operator/
 uvx jjx -- -m smoke
 ```
 
-We selected the `smoke` tests (the ones decorated `@pytest.mark.smoke`) because we want to minimize the footprint of what we're spinning up. The `smoke` tests deploy the charm and integrate it with a simulated PostgreSQL charm, producing containers for the workload and a PostgreSQL database. Later in the demo we'll try jjx without `-m smoke`.
+We selected the `smoke` tests (the ones decorated `@pytest.mark.smoke`) because we want to minimize the footprint of what we're spinning up. The `smoke` tests deploy the charm and integrate it with a simulated PostgreSQL charm, producing containers for the workload and a database. Later in the demo we'll try jjx without `-m smoke`.
 
 For now, open a second terminal and play with the workload:
 
