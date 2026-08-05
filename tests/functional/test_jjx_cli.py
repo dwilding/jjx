@@ -54,7 +54,7 @@ def assert_no_connection(url: str) -> None:
     raise AssertionError(f"expected connection to fail for {url}")
 
 
-def test_uvx_jjx(k8s_1_minimal_patched):
+def test_uvx_jjx(k8s_2_configurable):
     command = [
         "uvx",
         "--with-editable",
@@ -63,7 +63,7 @@ def test_uvx_jjx(k8s_1_minimal_patched):
     ]
     proc = subprocess.Popen(
         command,
-        cwd=k8s_1_minimal_patched,
+        cwd=k8s_2_configurable,
         env={**os.environ, "PYTHONUNBUFFERED": "1"},
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -79,8 +79,8 @@ def test_uvx_jjx(k8s_1_minimal_patched):
         assert container_ip
         assert_connection(f"http://{container_ip}:8000")
         assert_no_connection("http://127.0.0.1:8000")
-        assert not (k8s_1_minimal_patched / "placeholder.charm").exists()
-        assert_no_jjx_in_charm_venv(k8s_1_minimal_patched)
+        assert not (k8s_2_configurable / "placeholder.charm").exists()
+        assert_no_jjx_in_charm_venv(k8s_2_configurable)
         # TEARDOWN
         proc.send_signal(signal.SIGINT)
         assert proc.wait(timeout=30) == 130
@@ -90,13 +90,13 @@ def test_uvx_jjx(k8s_1_minimal_patched):
         assert f"Removed {operator_container_name}" in output
         helpers.assert_no_container(container_name)
         helpers.assert_no_container(operator_container_name)
-        assert not (k8s_1_minimal_patched / ".jjx").exists()
+        assert not (k8s_2_configurable / ".jjx").exists()
     finally:
         if proc.poll() is None:
             proc.kill()
 
 
-def test_uvx_jjx_publish(k8s_1_minimal_patched):
+def test_uvx_jjx_publish(k8s_2_configurable):
     command = [
         "uvx",
         "--with-editable",
@@ -107,7 +107,7 @@ def test_uvx_jjx_publish(k8s_1_minimal_patched):
     ]
     proc = subprocess.Popen(
         command,
-        cwd=k8s_1_minimal_patched,
+        cwd=k8s_2_configurable,
         env={**os.environ, "PYTHONUNBUFFERED": "1"},
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -124,7 +124,7 @@ def test_uvx_jjx_publish(k8s_1_minimal_patched):
             proc.kill()
 
 
-def test_uv_run_jjx(k8s_1_minimal_patched):
+def test_uv_run_jjx(k8s_2_configurable):
     command = [
         "uv",
         "pip",
@@ -134,7 +134,7 @@ def test_uv_run_jjx(k8s_1_minimal_patched):
     ]
     subprocess.run(
         command,
-        cwd=k8s_1_minimal_patched,
+        cwd=k8s_2_configurable,
         check=True,
     )
     command = [
@@ -144,7 +144,7 @@ def test_uv_run_jjx(k8s_1_minimal_patched):
     ]
     proc = subprocess.Popen(
         command,
-        cwd=k8s_1_minimal_patched,
+        cwd=k8s_2_configurable,
         env={**os.environ, "PYTHONUNBUFFERED": "1"},
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -160,7 +160,7 @@ def test_uv_run_jjx(k8s_1_minimal_patched):
             proc.kill()
 
 
-def test_jjx_detach_then_down(k8s_1_minimal_patched):
+def test_jjx_detach_then_down(k8s_2_configurable):
     command = [
         "uv",
         "run",
@@ -169,7 +169,7 @@ def test_jjx_detach_then_down(k8s_1_minimal_patched):
     ]
     result = subprocess.run(
         command,
-        cwd=k8s_1_minimal_patched,
+        cwd=k8s_2_configurable,
         capture_output=True,
         text=True,
     )
@@ -182,7 +182,7 @@ def test_jjx_detach_then_down(k8s_1_minimal_patched):
     assert "Workload running at " in result.stdout
     helpers.assert_container(container_name)
     helpers.assert_container(operator_container_name)
-    assert not (k8s_1_minimal_patched / "placeholder.charm").exists()
+    assert not (k8s_2_configurable / "placeholder.charm").exists()
     # TEARDOWN
     command = [
         "uv",
@@ -192,7 +192,7 @@ def test_jjx_detach_then_down(k8s_1_minimal_patched):
     ]
     result = subprocess.run(
         command,
-        cwd=k8s_1_minimal_patched,
+        cwd=k8s_2_configurable,
         capture_output=True,
         text=True,
     )
@@ -203,10 +203,10 @@ def test_jjx_detach_then_down(k8s_1_minimal_patched):
     assert f"Removed {operator_container_name}" in result.stdout
     helpers.assert_no_container(container_name)
     helpers.assert_no_container(operator_container_name)
-    assert not (k8s_1_minimal_patched / ".jjx").exists()
+    assert not (k8s_2_configurable / ".jjx").exists()
 
 
-def test_jjx_detach_then_rerun(k8s_1_minimal_patched):
+def test_jjx_detach_then_rerun(k8s_2_configurable):
     command = [
         "uv",
         "run",
@@ -215,19 +215,19 @@ def test_jjx_detach_then_rerun(k8s_1_minimal_patched):
     ]
     subprocess.run(
         command,
-        cwd=k8s_1_minimal_patched,
+        cwd=k8s_2_configurable,
         check=True,
     )
     result = subprocess.run(
         command,
-        cwd=k8s_1_minimal_patched,
+        cwd=k8s_2_configurable,
         capture_output=True,
         text=True,
     )
     assert result.returncode == 1
     assert "Workload running at " not in result.stdout
     assert " is up" in result.stderr
-    assert (k8s_1_minimal_patched / ".jjx").exists()
+    assert (k8s_2_configurable / ".jjx").exists()
     # TEARDOWN
     command = [
         "uv",
@@ -237,7 +237,7 @@ def test_jjx_detach_then_rerun(k8s_1_minimal_patched):
     ]
     result = subprocess.run(
         command,
-        cwd=k8s_1_minimal_patched,
+        cwd=k8s_2_configurable,
         capture_output=True,
         text=True,
     )
@@ -247,9 +247,9 @@ def test_jjx_detach_then_rerun(k8s_1_minimal_patched):
     assert result.stdout.count("Removed ") == 2
 
 
-def test_jjx_pytest_fail(k8s_1_minimal_patched):
+def test_jjx_pytest_fail(k8s_2_configurable):
     # Add a failing integration test.
-    test_charm = k8s_1_minimal_patched / "tests" / "integration" / "test_charm.py"
+    test_charm = k8s_2_configurable / "tests" / "integration" / "test_charm.py"
     test_charm.write_text(
         test_charm.read_text()
         + '\n\ndef test_always_fails():\n    raise AssertionError("deliberate failure")\n'
@@ -262,14 +262,14 @@ def test_jjx_pytest_fail(k8s_1_minimal_patched):
     ]
     result = subprocess.run(
         command,
-        cwd=k8s_1_minimal_patched,
+        cwd=k8s_2_configurable,
         capture_output=True,
         text=True,
     )
     assert result.returncode == 1
     # The container should still be running because `test_deploy` should have passed.
     assert "Workload running at " in result.stdout
-    assert (k8s_1_minimal_patched / ".jjx").exists()
+    assert (k8s_2_configurable / ".jjx").exists()
     # TEARDOWN
     command = [
         "uv",
@@ -279,7 +279,7 @@ def test_jjx_pytest_fail(k8s_1_minimal_patched):
     ]
     result = subprocess.run(
         command,
-        cwd=k8s_1_minimal_patched,
+        cwd=k8s_2_configurable,
         capture_output=True,
         text=True,
     )
@@ -289,9 +289,9 @@ def test_jjx_pytest_fail(k8s_1_minimal_patched):
     assert "Removed " in result.stdout
 
 
-def test_jjx_pytest_select(k8s_1_minimal_patched):
+def test_jjx_pytest_select(k8s_2_configurable):
     pytest_extra_args = '["-k", "test_deploy"]'
-    pyproject = k8s_1_minimal_patched / "pyproject.toml"
+    pyproject = k8s_2_configurable / "pyproject.toml"
     pyproject.write_text(
         pyproject.read_text() + f"\n[tool.jjx]\npytest-extra-args = {pytest_extra_args}\n"
     )
@@ -303,7 +303,7 @@ def test_jjx_pytest_select(k8s_1_minimal_patched):
     ]
     result = subprocess.run(
         command,
-        cwd=k8s_1_minimal_patched,
+        cwd=k8s_2_configurable,
         capture_output=True,
         text=True,
     )
@@ -311,7 +311,7 @@ def test_jjx_pytest_select(k8s_1_minimal_patched):
         f"jjx exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
     assert "Workload running at " in result.stdout
-    assert (k8s_1_minimal_patched / ".jjx").exists()
+    assert (k8s_2_configurable / ".jjx").exists()
     # TEARDOWN
     command = [
         "uv",
@@ -321,7 +321,7 @@ def test_jjx_pytest_select(k8s_1_minimal_patched):
     ]
     result = subprocess.run(
         command,
-        cwd=k8s_1_minimal_patched,
+        cwd=k8s_2_configurable,
         capture_output=True,
         text=True,
     )
@@ -331,7 +331,7 @@ def test_jjx_pytest_select(k8s_1_minimal_patched):
     assert "Removed " in result.stdout
 
 
-def test_jjx_pytest_select_verbose(k8s_1_minimal_patched):
+def test_jjx_pytest_select_verbose(k8s_2_configurable):
     command = [
         "uv",
         "run",
@@ -342,7 +342,7 @@ def test_jjx_pytest_select_verbose(k8s_1_minimal_patched):
     ]
     result = subprocess.run(
         command,
-        cwd=k8s_1_minimal_patched,
+        cwd=k8s_2_configurable,
         capture_output=True,
         text=True,
     )
@@ -360,14 +360,14 @@ def test_jjx_pytest_select_verbose(k8s_1_minimal_patched):
     ]
     subprocess.run(
         command,
-        cwd=k8s_1_minimal_patched,
+        cwd=k8s_2_configurable,
         check=True,
     )
 
 
-def test_jjx_no_deploy(k8s_1_minimal_patched):
+def test_jjx_no_deploy(k8s_2_configurable):
     # Break the integration test that deploys the charm.
-    test_charm = k8s_1_minimal_patched / "tests" / "integration" / "test_charm.py"
+    test_charm = k8s_2_configurable / "tests" / "integration" / "test_charm.py"
     test_charm.write_text(test_charm.read_text().replace("juju.deploy", "juju.dont_deploy"))
     command = [
         "uv",
@@ -376,10 +376,10 @@ def test_jjx_no_deploy(k8s_1_minimal_patched):
     ]
     result = subprocess.run(
         command,
-        cwd=k8s_1_minimal_patched,
+        cwd=k8s_2_configurable,
         capture_output=True,
         text=True,
     )
     assert result.returncode == 1
     assert "Workload running at " not in result.stdout
-    assert not (k8s_1_minimal_patched / ".jjx").exists()
+    assert not (k8s_2_configurable / ".jjx").exists()
