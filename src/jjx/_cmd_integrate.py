@@ -211,6 +211,7 @@ def integrate(args: list[str], model: str | None) -> int:
     assert relation is not None
 
     _engine._run_relation_event_flow(model_name, real_app, relation, event="created")
+    _engine._run_relation_event_flow(model_name, real_app, relation, event="joined")
     _engine._run_relation_event_flow(model_name, real_app, relation, event="changed")
 
     return 0
@@ -339,6 +340,23 @@ def _integrate_cross_model(
     assert relation is not None
 
     _engine._run_relation_event_flow(local_model_name, local_app, relation, event="created")
+    _engine._run_relation_event_flow(local_model_name, local_app, relation, event="joined")
     _engine._run_relation_event_flow(local_model_name, local_app, relation, event="changed")
+
+    # Re-populate the remote (virtual) app's relation data after the charm
+    # has had a chance to write to its databag during relation-changed.
+    # This is needed for relations like grafana-dashboard where the virtual
+    # charm reads data the charm writes during the relation-changed event.
+    if remote_virtual is not None:
+        spec = _virtual_registry.get_spec(remote_virtual)
+        if spec is not None:
+            state = _engine._load_state()
+            local_model_state = state["models"][local_model_name]
+            relation = _engine._find_relation_by_id(local_model_state, relation_id)
+            assert relation is not None
+            remote_app_state = state["models"][remote_model_name]["apps"][remote_app_name]
+            info = remote_app_state.get(spec.info_key, {})
+            spec.populate(local_model_state, relation, remote_app_name, info)
+            _engine._save_state(state)
 
     return 0

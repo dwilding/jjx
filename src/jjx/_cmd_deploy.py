@@ -260,6 +260,14 @@ def deploy(args: list[str], model: str | None) -> int:
         command=["run", "--hold", "--create-dirs"],
     )
     model_state["apps"][app_name]["container_id"] = container_id
+    # Store the workload container's IP address in state so hook tools
+    # (e.g. network-get) can access it without calling docker directly,
+    # which isn't available inside the charm runner container.
+    try:
+        container_ip = _engine._docker_container_ip(container_name)
+    except _engine.CliError:
+        container_ip = ""
+    model_state["apps"][app_name]["container_ip"] = container_ip
 
     # Start the charm runner container — a persistent container that shares
     # the workload's network namespace and runs charm hooks via docker exec.

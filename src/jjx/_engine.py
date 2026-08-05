@@ -946,6 +946,7 @@ def _ensure_hook_tools(python_exe: str) -> None:
         "secret-remove",
         "secret-revoke",
         "secret-set",
+        "network-get",
     ]
     root = _hook_tools_dir()
     root.mkdir(parents=True, exist_ok=True)

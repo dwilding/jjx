@@ -88,6 +88,7 @@ def start_prometheus(
         command=[
             "--config.file=/etc/prometheus/prometheus.yml",
             "--storage.tsdb.path=/prometheus",
+            "--web.enable-lifecycle",
         ],
     )
 

@@ -87,7 +87,7 @@ Currently supported:
 
 - `postgresql-k8s` — starts a real PostgreSQL 16 container and provides the `postgresql_client` interface.
 - `loki-k8s` — starts a real Loki container and provides the `loki_push_api` interface. Workload logs flow via real Pebble log-targets.
-- `prometheus-k8s` — starts a real Prometheus container and consumes the `prometheus_scrape` interface. Configures itself from the charm's relation data.
+- `prometheus-k8s` — starts a real Prometheus container (with `--web.enable-lifecycle` for config reloads) and consumes the `prometheus_scrape` interface. Configures itself from the charm's relation data.
 - `grafana-k8s` — starts a real Grafana container and consumes the `grafana_dashboard` interface. Provisions Prometheus and Loki as datasources, imports dashboards from relation data.
 - `traefik-k8s` — a state-only virtual charm (no container) that responds to the `show-proxied-endpoints` action with the URLs of other COS charms.
 
@@ -176,6 +176,7 @@ Deploy flow:
 3. start workload container and Pebble with explicit `--network bridge` (no host networking)
    - Pebble is started with `run --hold --create-dirs` so baked-in layers (e.g. Rockcraft layers with `startup: enabled`) do not autostart services before the charm's pebble-ready hook fires — matching real Juju, which also uses `--hold`
    - if `JJX_PUBLISH` is set to `HOST_PORT:CONTAINER_PORT`, add port publish `127.0.0.1:HOST_PORT:CONTAINER_PORT`
+   - the workload container's IP is stored in `state.json` as `container_ip` so hook tools (e.g. `network-get`) can access it without calling Docker directly
 4. start charm runner container (`--network=container:<workload>`, bind-mounts for Python, venv, jjx source, charm dir, state dir)
 5. wait for Pebble socket (`/jjx/socket`) to be connectable inside charm runner
 6. generate hook tool scripts in `./.jjx/hook-tools/` (Python scripts with `#!/python/bin/python3.XX` shebangs)
@@ -212,6 +213,14 @@ Config flow:
 2. run `config-changed` hook
 3. persist resulting status
 
+Integrate flow:
+
+1. match endpoints by interface
+2. create relation in state
+3. populate the remote (virtual) app's databag from the virtual provider
+4. fire `relation-created`, `relation-joined`, then `relation-changed` on the local (real) charm
+5. re-populate the remote (virtual) app's databag — the charm may have written data (e.g. `scrape_jobs`, `dashboards`) during `relation-joined`/`relation-changed` that the virtual charm needs to read
+
 Destroy flow:
 
 1. kill any background pebble-ready processes (via `.jjx/*.deploy` marker files)
@@ -240,6 +249,20 @@ jjx implements several juju commands that jubilant/pytest-jubilant may call duri
 - `juju version` — returns a minimal version response
 - `juju show-model` — returns model metadata
 - `juju models` — lists all models in state
+
+## hook tools
+
+jjx implements the hook tools that `ops` calls as subprocesses. Each is a Python script in `./.jjx/hook-tools/` with a `#!/python/bin/python3.XX` shebang that `import jjx` directly.
+
+Implemented:
+
+- `config-get`, `status-get`, `status-set` — config and status management
+- `is-leader` — always returns `true` (single-unit model)
+- `juju-log` — appends to the model's log in `state.json`
+- `relation-ids`, `relation-list`, `relation-get`, `relation-set`, `relation-model-get` — relation data access
+- `secret-add`, `secret-get`, `secret-grant`, `secret-info-get`, `secret-ids`, `secret-remove`, `secret-revoke`, `secret-set` — secret management
+- `network-get` — returns the workload container's IP address (from `state.json`, not Docker, since Docker isn't available inside the charm runner). All bindings resolve to the workload's IP.
+- `application-version-set` — sets the workload version in state
 
 ## constraints
 
