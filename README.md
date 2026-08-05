@@ -20,41 +20,47 @@ The charm can't be too complex. If it requires storage, multiple units, or other
 
 ```sh
 # Grab a small K8s charm that requires a PostgreSQL database.
-git clone https://github.com/canonical/operator.git
-cd operator/examples/k8s-3-postgresql/
-charmcraft fetch-libs
+git clone https://github.com/dwilding/fastapi-demo-operator.git
+cd fastapi-demo-operator/
 
-# Run the workload, mapping localhost port 5000 to workload port 8000.
-uvx jjx -p 5000:8000
+# Run the workload, using the integration tests marked 'smoke'.
+uvx jjx -- -m smoke
 ```
 
-Then play with the workload (in a second terminal):
+We selected the `smoke` tests (the ones decorated `@pytest.mark.smoke`) because we want to minimize the footprint of what we're spinning up. The `smoke` tests deploy the charm and integrate it with a simulated PostgreSQL charm, producing containers for the workload and a PostgreSQL database. Later in the demo we'll try jjx without `-m smoke`.
+
+For now, open a second terminal and play with the workload:
 
 ```sh
-curl localhost:5000/names  # returns {"names":{}}
-curl -X POST -d 'name=elephant' localhost:5000/addname/
-curl localhost:5000/names  # returns {"names":{"1":"elephant"}}
+curl http://172.17.0.2:8000/names  # returns {"names":{}}
+curl -X POST -d 'name=elephant' http://172.17.0.2:8000/addname/
+curl http://172.17.0.2:8000/names  # returns {"names":{"1":"elephant"}}
 ```
 
-You can also probe the workload using [borescope](https://github.com/tonyandrewmeyer/borescope):
+You might need to use a different IP address — check the output of `uvx jjx`.
 
-```sh
-uvx borescope --socket .jjx/socket
-```
+> [!TIP]
+> Optional information to help a user be more successful.
 
-This gives you a prompt that feels like bash and has first-class support for Pebble commands. For example:
-
-<pre>
-<b>pebble:/#</b> ls api_demo_server/
-__init__.py
-app.py
-database.py
-<b>pebble:/#</b> services
-<b>SERVICE</b>  <b>STARTUP</b>  <b>CURRENT</b>
-fastapi  enabled  active
-</pre>
-
-For more detail, see [Command reference](https://borescope.dev/docs/reference-commands.html) in the borescope docs.
+> You can probe the workload using [borescope](https://github.com/tonyandrewmeyer/borescope):
+>
+> ```sh
+> uvx borescope --socket .jjx/socket
+> ```
+>
+> This gives you a prompt that feels like bash and has first-class support for Pebble commands. For example:
+>
+> <pre>
+> <b>pebble:/#</b> ls api_demo_server/
+> __init__.py
+> app.py
+> database.py
+> <b>pebble:/#</b> services
+> <b>SERVICE</b>  <b>STARTUP</b>  <b>CURRENT</b>
+> fastapi  enabled  active
+> </pre>
+>
+> For more detail, see [Command reference](https://borescope.dev/docs/reference-commands.html) in the borescope docs.
 
 ## System requirements
 
@@ -73,7 +79,7 @@ In the charm dir:
 uvx jjx
 ```
 
-This runs the charm's integration tests and starts a Docker container for the workload — assuming the integration tests try to deploy a `.charm` file along with a workload image. See [How jjx works](#how-jjx-works).
+This runs the charm's integration tests and starts a Docker container for the workload — assuming the tests try to deploy a `.charm` file along with a workload image. See [How jjx works](#how-jjx-works).
 
 The workload stays running until you press Ctrl-C.
 
@@ -137,8 +143,8 @@ rm placeholder.charm
 
 When the integration tests try to deploy a `.charm` file along with a workload image, `juju` starts a container for the charm code. `juju` also starts a container for the workload and injects Pebble into the container. The charm code has access to the Pebble socket, as Ops expects.
 
-Other Jubilant methods are handled by `juju` and routed to the charm code. For example, if an integration test calls `Juju.config()`, `juju` executes the charm code with its environment configured as a config-changed event. Ops recognizes the event and the charm code is able to apply the change using Pebble methods.
+Other Jubilant methods are handled by `juju` and routed to the charm code. For example, if a test calls `Juju.config()`, `juju` executes the charm code with its environment configured as a config-changed event. Ops recognizes the event and the charm code is able to apply the change using Pebble methods.
 
-If the integration tests try to deploy [postgresql-k8s](https://charmhub.io/postgresql-k8s), `juju` starts a container for the official [postgres](https://hub.docker.com/_/postgres) image and mocks the behavior of Charmed PostgreSQL. Once integrated with "postgresql-k8s", the charm code thinks it's talking to a real remote unit.
+If the tests try to deploy [postgresql-k8s](https://charmhub.io/postgresql-k8s), `juju` starts a container for the official [postgres](https://hub.docker.com/_/postgres) image and mocks the behavior of Charmed PostgreSQL. Once integrated with "postgresql-k8s", the charm code thinks it's talking to a real remote unit.
 
-In other words, everything is real from the perspective of the charm and its integration tests. The mocked parts are Juju, the cloud, and other charms.
+In other words, everything is real from the perspective of the charm and its tests. The mocked parts are Juju, the cloud, and other charms.
