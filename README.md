@@ -40,8 +40,6 @@ curl http://172.17.0.2:8000/names  # returns {"names":{"1":"elephant"}}
 You might need to use a different IP address — check the output of `uvx jjx`.
 
 > [!TIP]
-> Optional information to help a user be more successful.
-
 > You can probe the workload using [borescope](https://github.com/tonyandrewmeyer/borescope):
 >
 > ```sh
