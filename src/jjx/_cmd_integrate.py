@@ -321,12 +321,15 @@ def _integrate_cross_model(
     )
 
     # Populate the remote app's databag from the virtual provider.
+    # Pass the remote model state (where the virtual app lives) so the
+    # provider can find sibling virtual apps (e.g. grafana needs Prometheus
+    # and Loki, which live in the same COS model as grafana).
     remote_virtual = remote_app_state.get("virtual_kind")
     if remote_virtual is not None:
         spec = _virtual_registry.get_spec(remote_virtual)
         if spec is not None:
             info = remote_app_state.get(spec.info_key, {})
-            spec.populate(local_model_state, relation, remote_app_name, info)
+            spec.populate(remote_model_state, relation, remote_app_name, info)
 
     _engine._save_state(state)
 
@@ -347,16 +350,19 @@ def _integrate_cross_model(
     # has had a chance to write to its databag during relation-changed.
     # This is needed for relations like grafana-dashboard where the virtual
     # charm reads data the charm writes during the relation-changed event.
+    # Use the remote model state so the provider can find sibling virtual
+    # apps (e.g. grafana needs Prometheus and Loki from its own COS model).
     if remote_virtual is not None:
         spec = _virtual_registry.get_spec(remote_virtual)
         if spec is not None:
             state = _engine._load_state()
             local_model_state = state["models"][local_model_name]
+            remote_model_state = state["models"][remote_model_name]
             relation = _engine._find_relation_by_id(local_model_state, relation_id)
             assert relation is not None
-            remote_app_state = state["models"][remote_model_name]["apps"][remote_app_name]
+            remote_app_state = remote_model_state["apps"][remote_app_name]
             info = remote_app_state.get(spec.info_key, {})
-            spec.populate(local_model_state, relation, remote_app_name, info)
+            spec.populate(remote_model_state, relation, remote_app_name, info)
             _engine._save_state(state)
 
     return 0

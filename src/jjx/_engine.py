@@ -399,6 +399,20 @@ def _docker_run(
     return proc.stdout.strip()
 
 
+def _docker_restart(container_name: str, timeout: float = 30.0) -> None:
+    """Restart a container via ``docker restart``."""
+    try:
+        subprocess.run(
+            [_CONTAINER_BINARY, "restart", "--time", "10", container_name],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=True,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        raise CliError(f"docker restart failed for {container_name}: {exc}") from None
+
+
 def _docker_rm(container_name: str) -> None:
     subprocess.run(
         [_CONTAINER_BINARY, "rm", "--force", container_name],

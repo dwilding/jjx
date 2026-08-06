@@ -178,14 +178,9 @@ def update_datasources(
     provisioning_dir = Path(grafana_info["provisioning_dir"])
     ds_dir = provisioning_dir / "datasources"
     _write_datasource_config(ds_dir, prometheus_url, loki_url)
-    # Restart Grafana to pick up the new datasource config
-    _engine._docker_exec(
-        grafana_info["container_name"],
-        ["kill", "-HUP", "1"],
-        check=False,
-    )
-    # Give it a moment to restart
-    time.sleep(2.0)
+    # Restart Grafana to pick up the new datasource config. Grafana does not
+    # re-provision datasources on SIGHUP, so a full container restart is needed.
+    _engine._docker_restart(grafana_info["container_name"])
     _wait_for_grafana(grafana_info["container_name"], timeout=30.0)
 
 
@@ -225,12 +220,64 @@ def import_dashboards(
             continue
         try:
             decoded = lzma.decompress(base64.b64decode(content)).decode("utf-8")
+            dashboard = json.loads(decoded)
+            _inject_datasource_variables(dashboard)
             safe_name = key.replace(":", "_").replace("/", "_")
             dash_path = dash_dir / f"{safe_name}.json"
-            dash_path.write_text(decoded, encoding="utf-8")
+            dash_path.write_text(json.dumps(dashboard), encoding="utf-8")
             dash_path.chmod(0o666)
         except Exception:
             pass
+
+
+def _inject_datasource_variables(dashboard: dict[str, Any]) -> None:
+    """Inject datasource variables for ${prometheusds} and ${lokids} references.
+
+    Dashboards from charms reference datasources via ``${prometheusds}`` and
+    ``${lokids}`` UID placeholders. The real grafana-k8s charm injects matching
+    datasource variables into the dashboard's templating list when it imports
+    the dashboard, so Grafana can resolve the placeholders to the provisioned
+    datasources. We do the same here.
+    """
+    # The datasource UIDs that jjx provisions, mapped to their Grafana
+    # datasource type and display name.
+    datasource_uids = {
+        "prometheusds": ("prometheus", "Prometheus"),
+        "lokids": ("loki", "Loki"),
+    }
+
+    # Collect the datasource UID variable names referenced in the dashboard.
+    referenced: set[str] = set()
+    for panel in dashboard.get("panels", []):
+        datasource = panel.get("datasource")
+        if isinstance(datasource, dict):
+            uid = datasource.get("uid", "")
+        else:
+            uid = datasource if isinstance(datasource, str) else ""
+        if uid.startswith("${") and uid.endswith("}"):
+            name = uid[2:-1]
+            if name in datasource_uids:
+                referenced.add(name)
+
+    if not referenced:
+        return
+
+    templating = dashboard.setdefault("templating", {})
+    existing = {v.get("name") for v in templating.get("list", [])}
+
+    for name in sorted(referenced):
+        if name in existing:
+            continue
+        ds_type, ds_text = datasource_uids[name]
+        templating.setdefault("list", []).append(
+            {
+                "name": name,
+                "type": "datasource",
+                "query": ds_type,
+                "current": {"text": ds_text, "value": name},
+                "hide": 2,
+            }
+        )
 
 
 def populate_relation(

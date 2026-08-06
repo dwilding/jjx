@@ -88,7 +88,7 @@ Currently supported:
 - `postgresql-k8s` — starts a real PostgreSQL 16 container and provides the `postgresql_client` interface.
 - `loki-k8s` — starts a real Loki container and provides the `loki_push_api` interface. Workload logs flow via real Pebble log-targets.
 - `prometheus-k8s` — starts a real Prometheus container (with `--web.enable-lifecycle` for config reloads) and consumes the `prometheus_scrape` interface. Configures itself from the charm's relation data.
-- `grafana-k8s` — starts a real Grafana container and consumes the `grafana_dashboard` interface. Provisions Prometheus and Loki as datasources, imports dashboards from relation data.
+- `grafana-k8s` — starts a real Grafana container and consumes the `grafana_dashboard` interface. Provisions Prometheus and Loki as datasources (via file-based provisioning, applied with a container restart since Grafana does not re-provision datasources on SIGHUP), imports dashboards from relation data, and injects datasource variables (`${prometheusds}`, `${lokids}`) into imported dashboards so Grafana can resolve the placeholder UIDs — mirroring what the real grafana-k8s charm does.
 - `traefik-k8s` — a state-only virtual charm (no container) that responds to the `show-proxied-endpoints` action with the URLs of other COS charms.
 
 Virtual bundles (e.g. `cos-lite`) deploy multiple virtual charms in one `juju deploy` command.
@@ -217,7 +217,7 @@ Integrate flow:
 
 1. match endpoints by interface
 2. create relation in state
-3. populate the remote (virtual) app's databag from the virtual provider
+3. populate the remote (virtual) app's databag from the virtual provider, passing the model state the virtual app lives in (so the provider can find sibling virtual apps — e.g. grafana needs Prometheus and Loki, which live in the same COS model)
 4. fire `relation-created`, `relation-joined`, then `relation-changed` on the local (real) charm
 5. re-populate the remote (virtual) app's databag — the charm may have written data (e.g. `scrape_jobs`, `dashboards`) during `relation-joined`/`relation-changed` that the virtual charm needs to read
 
