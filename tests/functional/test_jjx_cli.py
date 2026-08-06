@@ -176,10 +176,10 @@ def test_jjx_detach_then_down(k8s_2_configurable):
     assert result.returncode == 0, (
         f"jjx exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
+    assert "Workload running at " in result.stdout
     model_name = result.stdout.split("--juju-model ")[1].split()[0]
     container_name = f"{model_name}-test-charm-fastapi-demo"
     operator_container_name = f"{model_name}-test-charm-operator"
-    assert "Workload running at " in result.stdout
     helpers.assert_container(container_name)
     helpers.assert_container(operator_container_name)
     assert not (k8s_2_configurable / "placeholder.charm").exists()
@@ -382,4 +382,7 @@ def test_jjx_no_deploy(k8s_2_configurable):
     )
     assert result.returncode == 1
     assert "Workload running at " not in result.stdout
+    model_name = result.stdout.split("--juju-model ")[1].split()[0]
+    helpers.assert_no_container(f"{model_name}-test-charm-operator")
+    helpers.assert_no_container(f"{model_name}-test-charm-fastapi-demo")
     assert not (k8s_2_configurable / ".jjx").exists()
