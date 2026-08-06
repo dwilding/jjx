@@ -16,7 +16,7 @@ JUJU = [
     PACKAGE_DIR,
     "juju",
 ]
-CONTAINER_NAME = "jjx-default-fastapi-demo"
+CONTAINER_NAME = "jjx-default-demo-server"
 
 
 def assert_process_count(count: int) -> None:
