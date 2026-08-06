@@ -16,6 +16,13 @@ You can use jjx to quickly "run" a charm and play with its workload. No need to 
 
 The charm can't be too complex. If it requires storage, multiple units, or other charms, jjx might not work. The limitations are deliberately vague while jjx is a v0 tool.
 
+## System requirements
+
+- **[uv](https://docs.astral.sh/uv/getting-started/installation/)** — To install on Ubuntu, run `sudo snap install astral-uv --classic`.
+- **[Docker](https://docs.docker.com/engine/install/)** — To install on Ubuntu, run `sudo snap install docker`.
+
+By default, Docker commands require `sudo`, but jjx runs Docker commands as a regular user. To allow Docker commands, run `sudo usermod -aG docker $USER`, then log out and log in again.
+
 ## Demo
 
 ```sh
@@ -27,7 +34,7 @@ cd fastapi-demo-operator/
 uvx jjx -- -m smoke
 ```
 
-We selected the `smoke` tests (the ones decorated `@pytest.mark.smoke`) because we want to minimize the footprint of what we're spinning up. The `smoke` tests deploy the charm and integrate it with a simulated PostgreSQL charm, producing containers for the workload and a database. Later in the demo we'll try jjx without `-m smoke`.
+We selected the smoke tests (the ones decorated `@pytest.mark.smoke`) because we want to minimize the footprint of what we're spinning up. The smoke tests deploy the charm and integrate it with a simulated PostgreSQL charm, producing containers for the workload and a database. The smoke tests don't deploy the observability apps the charm supports. Later in the demo we'll try jjx without `-m smoke`.
 
 For now, open a second terminal and play with the workload:
 
@@ -38,6 +45,8 @@ curl http://172.17.0.2:8000/names  # returns {"names":{"1":"elephant"}}
 ```
 
 You might need to use a different IP address — check the output of `uvx jjx`.
+
+For more detail about the workload, see [Study your application](https://canonical.com/juju/docs/ops/latest/tutorial/from-zero-to-hero-write-your-first-kubernetes-charm/study-your-application/) in the "zero to hero" K8s charm tutorial. Our charm is based on that tutorial.
 
 > [!TIP]
 > You can use [borescope](https://github.com/tonyandrewmeyer/borescope) to probe the workload:
@@ -60,12 +69,17 @@ You might need to use a different IP address — check the output of `uvx jjx`.
 >
 > For more detail, see [Command reference](https://borescope.dev/docs/reference-commands.html) in the borescope docs.
 
-## System requirements
+Next, press Ctrl-C in your first terminal. This stops and removes all containers.
 
-- **[uv](https://docs.astral.sh/uv/getting-started/installation/)** — To install on Ubuntu, run `sudo snap install astral-uv --classic`.
-- **[Docker](https://docs.docker.com/engine/install/)** — To install on Ubuntu, run `sudo snap install docker`.
+Then run the workload again, this time using the full suite of integration tests:
 
-By default, Docker commands require `sudo`, but jjx runs Docker commands as a regular user. To allow Docker commands, run `sudo usermod -aG docker $USER`, then log out and log in again.
+```sh
+uvx jjx
+```
+
+In addition to deploying the charm and integrating it with PostgreSQL, the tests deploy [COS Lite](https://charmhub.io/cos-lite) and integrate the charm with Grafana, Prometheus, and Loki. The output of `uvx jjx` includes the locations of these observability apps.
+
+Finally, open Grafana and Prometheus in your browser and explore the available data. For ideas, see [Inspect the Grafana dashboard](https://canonical.com/juju/docs/ops/latest/tutorial/from-zero-to-hero-write-your-first-kubernetes-charm/observe-your-charm-with-cos-lite/#inspect-the-grafana-dashboard) and [Inspect metrics in Prometheus](https://canonical.com/juju/docs/ops/latest/tutorial/from-zero-to-hero-write-your-first-kubernetes-charm/observe-your-charm-with-cos-lite/#inspect-metrics-in-prometheus) in the "zero to hero" tutorial.
 
 ## Usage
 
@@ -143,6 +157,11 @@ When the integration tests try to deploy a `.charm` file along with a workload i
 
 Other Jubilant methods are handled by `juju` and routed to the charm code. For example, if a test calls `Juju.config()`, `juju` executes the charm code with its environment configured as a config-changed event. Ops recognizes the event and the charm code is able to apply the change using Pebble methods.
 
-If the tests try to deploy [postgresql-k8s](https://charmhub.io/postgresql-k8s), `juju` starts a container for the official [postgres](https://hub.docker.com/_/postgres) image and mocks the behavior of Charmed PostgreSQL. Once integrated with "postgresql-k8s", the charm code thinks it's talking to a real remote unit.
+If the tests try to deploy the following charms/bundles, `juju` starts extra containers and simulates remote units.
 
-In other words, everything is real from the perspective of the charm and its tests. The mocked parts are Juju, the cloud, and other charms.
+| Supported charm/bundle | Extra containers |
+| --- | --- |
+| [postgresql-k8s](https://charmhub.io/postgresql-k8s) | [postgres](https://hub.docker.com/_/postgres) |
+| [cos-lite](https://charmhub.io/cos-lite) | [grafana](https://hub.docker.com/r/grafana/grafana), [prometheus](https://hub.docker.com/r/prom/prometheus), [loki](https://hub.docker.com/r/grafana/loki) |
+
+From the perspective of the charm and its tests, everything is real. The mocked parts are Juju, the cloud, and other charms.

@@ -15,7 +15,7 @@
 
   <!-- Terminal output -->
   <g font-family="'JetBrains Mono','Fira Code','Cascadia Code',Consolas,monospace" font-size="14">
-    <text x="24" y="56" fill="#3FB950">================================== 2 passed in 19.13s ==================================</text>
+    <text x="24" y="56" fill="#3FB950">================================== 3 passed in 47.46s ==================================</text>
     <text x="24" y="96" fill="#E8E8E8">Workload running at 172.17.0.2</text>
     <text x="24" y="136" fill="#E8E8E8">Press Ctrl-C to tear down</text>
     <!-- Static caret -->
