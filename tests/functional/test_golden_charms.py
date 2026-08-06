@@ -43,7 +43,7 @@ def test_httpbin_demo(temp_dir):
     model_name = result.stdout.split("--juju-model ")[1].split()[0]
     container_names = [
         f"{model_name}-test-charm-operator",
-        f"{model_name}-test-charm-httpbin-demo",
+        f"{model_name}-test-charm-httpbin",
     ]
     for container_name in container_names:
         helpers.assert_container(container_name)
@@ -105,7 +105,7 @@ def test_fastapi_demo(temp_dir):
     model_name = result.stdout.split("--juju-model ")[1].split()[0]
     container_names = [
         f"{model_name}-test-charm-operator",
-        f"{model_name}-test-charm-fastapi-demo",
+        f"{model_name}-test-charm-demo-server",
         f"{model_name}-test-charm-postgres",
         f"{model_name}-test-charm-cos-loki",
         f"{model_name}-test-charm-cos-prometheus",
@@ -120,7 +120,7 @@ def test_fastapi_demo(temp_dir):
     )
     helpers.assert_prometheus_config(
         prometheus_ip=helpers.container_ip(f"{model_name}-test-charm-cos-prometheus"),
-        workload_ip=helpers.container_ip(f"{model_name}-test-charm-fastapi-demo"),
+        workload_ip=helpers.container_ip(f"{model_name}-test-charm-demo-server"),
         metric="starlette_requests_total",
     )
     helpers.assert_grafana_config(
@@ -171,7 +171,7 @@ def test_fastapi_demo_deselect_deploy(temp_dir):
     model_name = result.stdout.split("--juju-model ")[1].split()[0]
     container_names = [
         f"{model_name}-test-charm-operator",
-        f"{model_name}-test-charm-fastapi-demo",
+        f"{model_name}-test-charm-demo-server",
         f"{model_name}-test-charm-postgres",
         f"{model_name}-test-charm-cos-loki",
         f"{model_name}-test-charm-cos-prometheus",

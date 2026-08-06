@@ -93,7 +93,7 @@ Currently supported:
 
 Virtual bundles (e.g. `cos-lite`) deploy multiple virtual charms in one `juju deploy` command.
 
-Virtual charm containers are named `<model>-<app>` and are cleaned up on model teardown. Teardown order is determined by each charm's `teardown_priority`: COS containers (grafana=10, prometheus=20, loki=30) are removed first, then postgres (40), workload (50), and charm runners (60).
+Virtual charm containers are named `<model>-<app>` and are cleaned up on model teardown. The real charm's workload container is named `<model>-<container>` (using the container name from `charmcraft.yaml`, not the app name). Teardown order is determined by each charm's `teardown_priority`: COS containers (grafana=10, prometheus=20, loki=30) are removed first, then postgres (40), workload (50), and charm runners (60).
 
 ## runtime model
 

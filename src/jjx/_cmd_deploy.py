@@ -191,7 +191,10 @@ def deploy(args: list[str], model: str | None) -> int:
     if not image:
         raise _engine.CliError(f"missing required --resource {resource_name}=<image>")
 
-    container_name = _engine._sanitize_container_name(f"{model_name}-{app_name}")
+    # Name the workload container after the container name (from charmcraft.yaml),
+    # not the app name — matching real Juju, where the pod/container is named
+    # after the workload container, not the application.
+    container_name = _engine._sanitize_container_name(f"{model_name}-{workload}")
     defaults = _engine._default_config(charm_source)
 
     model_state["apps"][app_name] = {

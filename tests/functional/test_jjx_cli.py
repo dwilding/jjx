@@ -72,7 +72,7 @@ def test_uvx_jjx(k8s_2_configurable):
     try:
         model_line = wait_for_output_line(proc, "--juju-model ")
         model_name = model_line.split("--juju-model ")[1].split()[0]
-        container_name = f"{model_name}-test-charm-fastapi-demo"
+        container_name = f"{model_name}-test-charm-demo-server"
         operator_container_name = f"{model_name}-test-charm-operator"
         status_line = wait_for_output_line(proc, "Workload running at ")
         _, _, container_ip = status_line.partition("Workload running at ")
@@ -178,7 +178,7 @@ def test_jjx_detach_then_down(k8s_2_configurable):
     )
     assert "Workload running at " in result.stdout
     model_name = result.stdout.split("--juju-model ")[1].split()[0]
-    container_name = f"{model_name}-test-charm-fastapi-demo"
+    container_name = f"{model_name}-test-charm-demo-server"
     operator_container_name = f"{model_name}-test-charm-operator"
     helpers.assert_container(container_name)
     helpers.assert_container(operator_container_name)
@@ -384,5 +384,5 @@ def test_jjx_no_deploy(k8s_2_configurable):
     assert "Workload running at " not in result.stdout
     model_name = result.stdout.split("--juju-model ")[1].split()[0]
     helpers.assert_no_container(f"{model_name}-test-charm-operator")
-    helpers.assert_no_container(f"{model_name}-test-charm-fastapi-demo")
+    helpers.assert_no_container(f"{model_name}-test-charm-demo-server")
     assert not (k8s_2_configurable / ".jjx").exists()
