@@ -46,7 +46,7 @@ curl http://172.17.0.2:8000/names  # returns {"names":{"1":"elephant"}}
 
 You might need to use a different IP address — check the output of `uvx jjx`.
 
-For more detail about the workload, see [Study your application](https://canonical.com/juju/docs/ops/latest/tutorial/from-zero-to-hero-write-your-first-kubernetes-charm/study-your-application/) in the "zero to hero" K8s charm tutorial. Our charm is based on that tutorial.
+For more detail about the workload, see [Study your application](https://canonical.com/juju/docs/ops/latest/tutorial/from-zero-to-hero-write-your-first-kubernetes-charm/study-your-application/) in the *zero to hero* K8s charm tutorial. Our charm is based on that tutorial.
 
 > [!TIP]
 > You can use [borescope](https://github.com/tonyandrewmeyer/borescope) to probe the workload:
@@ -59,9 +59,9 @@ For more detail about the workload, see [Study your application](https://canonic
 >
 > <pre>
 > <b>pebble:/#</b> ps
-> <b>PID</b>  <b>TTY</b>  <b>TIME</b> <b>CMD</b>
->   1 ?      00:00:00 pebble
->  17 ?      00:00:00 uvicorn
+> <b>PID</b> TTY     <b>TIME</b> <b>CMD</b>
+>   1 ?   00:00:00 pebble
+>  17 ?   00:00:00 uvicorn
 > <b>pebble:/#</b> services
 > <b>SERVICE</b>  <b>STARTUP</b>  <b>CURRENT</b>
 > fastapi  enabled  active
@@ -77,9 +77,9 @@ Then run the workload again, this time using the full suite of integration tests
 uvx jjx
 ```
 
-In addition to deploying the charm and integrating it with PostgreSQL, the tests deploy [COS Lite](https://charmhub.io/cos-lite) and integrate the charm with Grafana, Prometheus, and Loki. The output of `uvx jjx` shows how to access these observability apps.
+In addition to deploying the charm and integrating it with PostgreSQL, the tests deploy [COS Lite](https://charmhub.io/cos-lite) and integrate the charm with Grafana, Prometheus, and Loki. The output of `uvx jjx` shows how to access these apps.
 
-Finally, open Grafana and Prometheus in your browser and explore the available data. For ideas, see [Inspect the Grafana dashboard](https://canonical.com/juju/docs/ops/latest/tutorial/from-zero-to-hero-write-your-first-kubernetes-charm/observe-your-charm-with-cos-lite/#inspect-the-grafana-dashboard) and [Inspect metrics in Prometheus](https://canonical.com/juju/docs/ops/latest/tutorial/from-zero-to-hero-write-your-first-kubernetes-charm/observe-your-charm-with-cos-lite/#inspect-metrics-in-prometheus) in the "zero to hero" tutorial.
+Finally, open Grafana and Prometheus in your browser and explore the available data. For ideas, see [Inspect the Grafana dashboard](https://canonical.com/juju/docs/ops/latest/tutorial/from-zero-to-hero-write-your-first-kubernetes-charm/observe-your-charm-with-cos-lite/#inspect-the-grafana-dashboard) and [Inspect metrics in Prometheus](https://canonical.com/juju/docs/ops/latest/tutorial/from-zero-to-hero-write-your-first-kubernetes-charm/observe-your-charm-with-cos-lite/#inspect-metrics-in-prometheus) in the *zero to hero* tutorial.
 
 ## Usage
 
@@ -95,7 +95,7 @@ This runs the charm's integration tests and starts a Docker container for the wo
 
 The workload stays running until you press Ctrl-C.
 
-The output shows the IP address of the workload. You can play with the workload by connecting to this address.
+The output shows the workload's IP address. You can play with the workload by connecting to this address.
 
 Alternatively, to play with the workload on localhost, specify a port mapping:
 
@@ -157,7 +157,7 @@ When the integration tests try to deploy a `.charm` file along with a workload i
 
 Other Jubilant methods are handled by `juju` and routed to the charm code. For example, if a test calls `Juju.config()`, `juju` executes the charm code with its environment configured as a config-changed event. Ops recognizes the event and the charm code is able to apply the change using Pebble methods.
 
-If the tests try to deploy the following charms/bundles, `juju` starts extra containers and simulates remote units.
+If the tests try to deploy the following charms/bundles, `juju` starts extra containers and mocks remote units.
 
 | Supported charm/bundle | Extra containers |
 | --- | --- |
