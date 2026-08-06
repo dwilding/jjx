@@ -66,6 +66,18 @@ def _wait_for_postgres(container_name: str, database_name: str, timeout: float =
     raise _engine.CliError(f"postgres did not become ready in {container_name}: {last_error}")
 
 
+def start_postgres_wrapper(
+    model_name: str,
+    app_name: str,
+) -> dict[str, Any]:
+    """Wrapper matching the standard StartFunc signature.
+
+    Uses a fixed database name of ``names_db`` (the name the tutorial charm
+    requests). A future improvement could read this from the relation.
+    """
+    return start_postgres(model_name, app_name, "names_db")
+
+
 def start_postgres(
     model_name: str,
     app_name: str,
@@ -146,16 +158,10 @@ def populate_relation(
     - ``provided-secrets``: JSON list ["secret-user"]
     - ``data``: JSON snapshot for diff tracking
     """
-    # Refresh the container IP in case it changed since deploy time
-    # (e.g. due to a Docker restart).
-    container_name = pg_info["container_name"]
-    try:
-        details = _engine._docker_container_details(container_name)
-        if details.running and details.ip_address:
-            pg_info["host"] = details.ip_address
-            pg_info["ip_address"] = details.ip_address
-    except _engine.CliError:
-        pass  # Use the IP captured at deploy time
+    # Refresh the container IP in case it changed since deploy time.
+    from . import _virtual_registry
+
+    _virtual_registry.resolve_endpoint_url(pg_info, POSTGRES_PORT)
 
     # Create the secret with username and password.
     secret_id = _engine._next_secret_id(model_state)

@@ -399,6 +399,20 @@ def _docker_run(
     return proc.stdout.strip()
 
 
+def _docker_restart(container_name: str, timeout: float = 30.0) -> None:
+    """Restart a container via ``docker restart``."""
+    try:
+        subprocess.run(
+            [_CONTAINER_BINARY, "restart", "--time", "10", container_name],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=True,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        raise CliError(f"docker restart failed for {container_name}: {exc}") from None
+
+
 def _docker_rm(container_name: str) -> None:
     subprocess.run(
         [_CONTAINER_BINARY, "rm", "--force", container_name],
@@ -408,6 +422,9 @@ def _docker_rm(container_name: str) -> None:
     # Wait for the container to be fully removed. Without this, a subsequent
     # _docker_run with the same name can race with the old container's cleanup,
     # causing issues like postgres reporting "the database system is shutting down".
+    # We check both `docker inspect` (for the container object) and `docker ps --all`
+    # (for the container listing), because `docker ps --all` can lag behind
+    # `docker inspect` briefly after `docker rm --force`.
     deadline = time.monotonic() + 10.0
     while time.monotonic() < deadline:
         result = subprocess.run(
@@ -416,10 +433,25 @@ def _docker_rm(container_name: str) -> None:
             text=True,
         )
         if result.returncode != 0:
-            # Container no longer exists.
-            break
+            # Container no longer exists according to inspect.
+            # Double-check it's also gone from `docker ps --all`.
+            ps_result = subprocess.run(
+                [
+                    _CONTAINER_BINARY,
+                    "ps",
+                    "--all",
+                    "--filter",
+                    f"name=^{container_name}$",
+                    "--format",
+                    "{{.Names}}",
+                ],
+                capture_output=True,
+                text=True,
+            )
+            if not ps_result.stdout.strip():
+                break
         time.sleep(0.1)
-    print(f"Removed container {container_name}")
+    print(f"Removed {container_name}")
 
 
 def _docker_container_details(container_name: str) -> ContainerDetails:
@@ -468,6 +500,11 @@ def _docker_container_ip(container_name: str) -> str:
 
 
 def _running_workload_container() -> ContainerDetails | None:
+    """Find the charm's workload container, if it is running.
+
+    Only non-virtual apps (the real charm) are considered — virtual charm
+    containers (postgres, COS) should not keep jjx alive on their own.
+    """
     state = _load_state()
     for model_state in state.get("models", {}).values():
         apps = model_state.get("apps", {})
@@ -475,6 +512,8 @@ def _running_workload_container() -> ContainerDetails | None:
             continue
         for app_state in apps.values():
             if not isinstance(app_state, dict):
+                continue
+            if app_state.get("virtual"):
                 continue
             container_name = app_state.get("container_name")
             if not isinstance(container_name, str) or not container_name:
@@ -928,6 +967,7 @@ def _ensure_hook_tools(python_exe: str) -> None:
         "secret-remove",
         "secret-revoke",
         "secret-set",
+        "network-get",
     ]
     root = _hook_tools_dir()
     root.mkdir(parents=True, exist_ok=True)

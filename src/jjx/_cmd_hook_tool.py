@@ -235,6 +235,9 @@ def hook_tool(args: list[str]) -> int:
     if tool == "secret-set":
         return _secret_set(tool_args, model_state, state)
 
+    if tool == "network-get":
+        return _network_get(tool_args, app_state)
+
     raise _engine.CliError(f"unsupported hook tool: {tool}")
 
 
@@ -860,4 +863,80 @@ def _secret_set(tool_args: list[str], model_state: dict[str, Any], state: dict[s
         secret["content"].update(content)
         secret["revision"] = secret.get("revision", 1) + 1
     _engine._save_state(state)
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# network-get hook tool
+# ---------------------------------------------------------------------------
+
+
+def _network_get(tool_args: list[str], app_state: dict[str, Any]) -> int:
+    """Handle the ``network-get`` hook tool.
+
+    Returns the workload container's IP address in the format expected by ops.
+    The binding name (relation name or extra-binding name) is accepted but not
+    used — in jjx, all bindings resolve to the workload container's IP.
+    """
+    output_format = "json"
+    binding_name = None
+    i = 0
+    while i < len(tool_args):
+        token = tool_args[i]
+        if token == "--format" and i + 1 < len(tool_args):
+            output_format = tool_args[i + 1]
+            i += 2
+            continue
+        if token.startswith("--format="):
+            output_format = token.split("=", 1)[1]
+            i += 1
+            continue
+        if token == "-r" and i + 1 < len(tool_args):
+            # Skip the relation ID — we don't need it.
+            i += 2
+            continue
+        if token.startswith("-r"):
+            i += 1
+            continue
+        if not binding_name:
+            binding_name = token
+        i += 1
+
+    if not binding_name:
+        raise _engine.CliError("network-get requires a binding name")
+
+    # Get the workload container's IP address from state (not via docker,
+    # which isn't available inside the charm runner container).
+    ip_address = app_state.get("container_ip", "")
+    if not ip_address:
+        # Fall back to querying docker if available (e.g. when running
+        # hook tools from the host, not from inside the charm runner).
+        container_name = app_state.get("container_name", "")
+        if container_name:
+            try:
+                ip_address = _engine._docker_container_ip(container_name)
+            except _engine.CliError:
+                pass
+
+    network_info = {
+        "bind-addresses": [
+            {
+                "interface-name": "eth0",
+                "addresses": [
+                    {
+                        "hostname": "",
+                        "value": ip_address,
+                        "cidr": f"{ip_address}/32" if ip_address else "",
+                    }
+                ],
+            }
+        ],
+        "ingress-addresses": [ip_address] if ip_address else [],
+        "egress-subnets": [f"{ip_address}/32"] if ip_address else [],
+    }
+
+    if output_format == "json":
+        sys.stdout.write(json.dumps(network_info))
+    else:
+        sys.stdout.write(yaml.safe_dump(network_info, default_flow_style=False))
     return 0

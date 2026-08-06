@@ -16,8 +16,6 @@ def add_model(args: list[str]) -> int:
     model_name = filtered[0]
     state = _engine._load_state()
     models = state.setdefault("models", {})
-    if models and model_name not in models:
-        raise _engine.CliError("only a single model is supported")
     if model_name in models:
         raise _engine.CliError(f"model {model_name} already exists")
 

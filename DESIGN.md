@@ -16,7 +16,7 @@ Optional flags:
 
 - `-p HOST:CONTAINER` — publish a container port to `127.0.0.1:HOST`
 
-`jjx` handles the full lifecycle: preflight cleanup of any stale state, creating and removing the placeholder charm artifact, invoking pytest, and tearing down on exit.
+`jjx` handles the full lifecycle: preflight cleanup of any stale state, creating and removing the placeholder charm artifact, invoking pytest, and tearing down on exit. After pytest finishes, `jjx` checks whether the charm's workload container is running (virtual charm containers don't count). If it is, `jjx` waits for Ctrl-C (or detaches with `-d`); if not, `jjx` tears down all models and exits.
 
 ## customization
 
@@ -64,6 +64,10 @@ Supported:
 - hook tools needed by the charm
 - real Pebble in Docker
 - relations with virtual charms (see below)
+- multiple models (e.g. a charm model and a COS model)
+- cross-model relations via `juju offer` and `juju integrate <model>.<app>`
+- virtual bundles (e.g. `juju deploy cos-lite`)
+- `juju run` (actions) on virtual charms
 
 Not supported:
 
@@ -77,11 +81,19 @@ If a charm needs any of the above, use real Juju.
 
 `jjx` can recognize certain well-known charm names as "virtual" charms. A virtual charm has no charm code — `jjx` manages its workload and relation data directly.
 
+All virtual charms are registered in a central registry (`_virtual_registry.py`) that specifies their start function, relation populate function, endpoint metadata, display name, and teardown priority. Adding a new virtual charm requires only one registration call — no other file needs to change.
+
 Currently supported:
 
-- `postgresql-k8s` — starts a real PostgreSQL 16 container in Docker and provides the `postgresql_client` interface. When a charm integrates with it, `jjx` populates the relation databag and creates a Juju secret with the database credentials, mimicking what the real `postgresql-k8s` charm's `DatabaseProvides` would write. The charm under test sees real relation data and real secrets, and can connect to the running PostgreSQL instance.
+- `postgresql-k8s` — starts a real PostgreSQL 16 container and provides the `postgresql_client` interface.
+- `loki-k8s` — starts a real Loki container and provides the `loki_push_api` interface. Workload logs flow via real Pebble log-targets.
+- `prometheus-k8s` — starts a real Prometheus container (with `--web.enable-lifecycle` for config reloads) and consumes the `prometheus_scrape` interface. Configures itself from the charm's relation data.
+- `grafana-k8s` — starts a real Grafana container and consumes the `grafana_dashboard` interface. Provisions Prometheus and Loki as datasources (via file-based provisioning, applied with a container restart since Grafana does not re-provision datasources on SIGHUP), imports dashboards from relation data, and injects datasource variables (`${prometheusds}`, `${lokids}`) into imported dashboards so Grafana can resolve the placeholder UIDs — mirroring what the real grafana-k8s charm does.
+- `traefik-k8s` — a state-only virtual charm (no container) that responds to the `show-proxied-endpoints` action with the URLs of other COS charms.
 
-Virtual charm containers are named `<model>-<app>-postgres` and are cleaned up on model teardown alongside workload containers. They are removed first, before workload containers.
+Virtual bundles (e.g. `cos-lite`) deploy multiple virtual charms in one `juju deploy` command.
+
+Virtual charm containers are named `<model>-<app>` and are cleaned up on model teardown. Teardown order is determined by each charm's `teardown_priority`: COS containers (grafana=10, prometheus=20, loki=30) are removed first, then postgres (40), workload (50), and charm runners (60).
 
 ## runtime model
 
@@ -103,6 +115,8 @@ The `.charm` file passed to deploy is a trigger only. `jjx` does not inspect or 
 - `./.jjx/charm/` (staged runtime charm directory with `src/`, `lib/`, `metadata.yaml`, `config.yaml`, and `.unit-state.db`)
 - `./.jjx/socket` (Pebble API Unix socket, bind-mounted into both the workload and charm runner containers)
 - `./.jjx/<app>.<pid>.deploy` (marker files for in-flight background pebble-ready processes; created by deploy, deleted by the process on completion or by teardown)
+- `./.jjx/prom-config-<app>/` (Prometheus config directory, bind-mounted into the Prometheus container)
+- `./.jjx/grafana-config-<app>/` (Grafana provisioning directory, bind-mounted into the Grafana container)
 
 `jjx` also caches the Pebble binary at `~/.cache/jjx/pebble-bin`, downloaded from canonical/pebble GitHub Releases on first use. This cache is shared across projects and persists across model teardowns to enable reuse across multiple deployments.
 
@@ -113,7 +127,7 @@ Notes on generated runtime files:
 - `JJX_STATE_DIR` is set to `/jjx` (the in-container mount point of `.jjx/`) in the charm runner environment. Hook tools call back into `jjx` to read and write state; this env var lets them locate state directly.
 - `./.jjx/charm/.unit-state.db` is created by charm runtime state persistence (written by `ops` via `sqlite3` to `JUJU_CHARM_DIR/.unit-state.db`, which inside the charm runner is `/charm/.unit-state.db`).
 
-When the model is torn down, jjx kills any background pebble-ready processes (via `.deploy` marker files), then removes the entire `./.jjx/` directory. The `~/.cache/jjx/pebble-bin` cache is kept for reuse across subsequent deployments.
+When a model is torn down, jjx kills any background pebble-ready processes for that model's apps (via `.deploy` marker files), removes its containers in priority order, and removes the model from state. When the last model is torn down, the entire `./.jjx/` directory is removed. The `~/.cache/jjx/pebble-bin` cache is kept for reuse across subsequent deployments.
 
 ### charm runner container
 
@@ -138,7 +152,7 @@ The charm runner is a persistent Docker container that executes charm hooks.
 
 **Entrypoint**: The container runs `python -c 'import time; time.sleep(999999)'` — it stays alive doing nothing. Charm hooks are executed via `docker exec`.
 
-**Teardown**: The charm runner is removed *last* during model teardown, after postgres and workload containers. This ensures it is available for any cleanup hooks that might need it.
+**Teardown**: The charm runner is removed *last* during model teardown (priority 60), after COS containers, postgres, and workload containers. This ensures it is available for any cleanup hooks that might need it.
 
 ## execution contract
 
@@ -160,7 +174,9 @@ Deploy flow:
 1. ensure `./.jjx` exists and load state
 2. stage runtime charm files in `./.jjx/charm/` (`src/`, `metadata.yaml`, `config.yaml`)
 3. start workload container and Pebble with explicit `--network bridge` (no host networking)
+   - Pebble is started with `run --hold --create-dirs` so baked-in layers (e.g. Rockcraft layers with `startup: enabled`) do not autostart services before the charm's pebble-ready hook fires — matching real Juju, which also uses `--hold`
    - if `JJX_PUBLISH` is set to `HOST_PORT:CONTAINER_PORT`, add port publish `127.0.0.1:HOST_PORT:CONTAINER_PORT`
+   - the workload container's IP is stored in `state.json` as `container_ip` so hook tools (e.g. `network-get`) can access it without calling Docker directly
 4. start charm runner container (`--network=container:<workload>`, bind-mounts for Python, venv, jjx source, charm dir, state dir)
 5. wait for Pebble socket (`/jjx/socket`) to be connectable inside charm runner
 6. generate hook tool scripts in `./.jjx/hook-tools/` (Python scripts with `#!/python/bin/python3.XX` shebangs)
@@ -197,13 +213,22 @@ Config flow:
 2. run `config-changed` hook
 3. persist resulting status
 
+Integrate flow:
+
+1. match endpoints by interface
+2. create relation in state
+3. populate the remote (virtual) app's databag from the virtual provider, passing the model state the virtual app lives in (so the provider can find sibling virtual apps — e.g. grafana needs Prometheus and Loki, which live in the same COS model)
+4. fire `relation-created`, `relation-joined`, then `relation-changed` on the local (real) charm
+5. re-populate the remote (virtual) app's databag — the charm may have written data (e.g. `scrape_jobs`, `dashboards`) during `relation-joined`/`relation-changed` that the virtual charm needs to read
+
 Destroy flow:
 
 1. kill any background pebble-ready processes (via `.jjx/*.deploy` marker files)
-2. stop and remove postgres containers (if any)
-3. stop and remove workload containers
-4. stop and remove charm runner containers (last)
-5. remove `./.jjx/` directory
+2. remove containers in teardown-priority order: COS containers (grafana, prometheus, loki) → postgres → workload → charm runners
+3. clean up any stragglers (orphaned containers not tracked in state)
+4. remove this model from state; if it's the last model, remove `./.jjx/` entirely
+
+When `jjx down` tears down all models, models are destroyed in reverse creation order so that COS models (created later) are torn down first.
 
 ## behavior guarantees
 
@@ -213,6 +238,31 @@ Destroy flow:
 - synchronous event execution (no queue, no background agent), except `pebble-ready` which is dispatched asynchronously after a minimum 3.0s delay (see "async pebble-ready" above)
 - deterministic single-unit semantics
 - charm code that connects to loopback addresses (`127.0.0.1`, `localhost`, `::1`) reaches the workload container without exposing container ports on the host (the charm runner shares the workload's network namespace)
+
+## additional juju commands
+
+jjx implements several juju commands that jubilant/pytest-jubilant may call during setup, teardown, or status checks. These are minimal stubs that return just enough data for jubilant to function:
+
+- `juju offer` — records a cross-model offer in model state
+- `juju run` — executes actions on virtual charms (e.g. traefik's `show-proxied-endpoints`)
+- `juju switch` — no-op (jjx always uses `--model`)
+- `juju version` — returns a minimal version response
+- `juju show-model` — returns model metadata
+- `juju models` — lists all models in state
+
+## hook tools
+
+jjx implements the hook tools that `ops` calls as subprocesses. Each is a Python script in `./.jjx/hook-tools/` with a `#!/python/bin/python3.XX` shebang that `import jjx` directly.
+
+Implemented:
+
+- `config-get`, `status-get`, `status-set` — config and status management
+- `is-leader` — always returns `true` (single-unit model)
+- `juju-log` — appends to the model's log in `state.json`
+- `relation-ids`, `relation-list`, `relation-get`, `relation-set`, `relation-model-get` — relation data access
+- `secret-add`, `secret-get`, `secret-grant`, `secret-info-get`, `secret-ids`, `secret-remove`, `secret-revoke`, `secret-set` — secret management
+- `network-get` — returns the workload container's IP address (from `state.json`, not Docker, since Docker isn't available inside the charm runner). All bindings resolve to the workload's IP.
+- `application-version-set` — sets the workload version in state
 
 ## constraints
 

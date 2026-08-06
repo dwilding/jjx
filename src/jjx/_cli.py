@@ -21,8 +21,11 @@ from . import (
     _cmd_deploy,
     _cmd_destroy_model,
     _cmd_integrate,
+    _cmd_misc,
+    _cmd_offer,
     _cmd_remove_application,
     _cmd_hook_tool,
+    _cmd_run,
     _cmd_status,
     _cmd_wait_for,
     _engine,
@@ -69,6 +72,18 @@ def run_juju_command(argv: list[str]) -> int:
         return _cmd_debug_log.debug_log(rest, model)
     if command == "destroy-model":
         return _cmd_destroy_model.destroy_model(rest)
+    if command == "offer":
+        return _cmd_offer.offer(rest, model)
+    if command == "run":
+        return _cmd_run.run(rest, model)
+    if command == "switch":
+        return _cmd_misc.switch(rest)
+    if command == "version":
+        return _cmd_misc.version(rest)
+    if command == "show-model":
+        return _cmd_misc.show_model(rest, model)
+    if command == "models":
+        return _cmd_misc.models(rest)
 
     raise _engine.CliError(f"unknown command: {command}")
 
@@ -99,8 +114,45 @@ def juju_cli() -> int:
 def teardown_all_models() -> None:
     """Destroy all models currently in state."""
     state = _engine._load_state()
-    for model_name in state.get("models", {}):
+    # Destroy models in reverse creation order so that COS models (created
+    # later by JujuFactory) are torn down before the charm's model. This
+    # produces a more natural teardown order: COS containers first.
+    for model_name in reversed(list(state.get("models", {}))):
         _cmd_destroy_model.destroy_model([model_name])
+
+
+def _cos_endpoint_lines() -> list[str]:
+    """Return human-readable endpoint lines for virtual COS charms across all models.
+
+    Uses the virtual charm registry to find charms with display names.
+    Returns lines like ``Loki         http://172.17.0.3:3100`` so the user can
+    interact with them directly in a browser or via curl.
+    """
+    from . import _virtual_registry
+
+    state = _engine._load_state()
+    endpoints: dict[str, str] = {}
+    for model_name, model_state in state.get("models", {}).items():
+        for app_name, app_state in model_state.get("apps", {}).items():
+            if not app_state.get("virtual"):
+                continue
+            virtual_kind = app_state.get("virtual_kind")
+            spec = _virtual_registry.get_spec(virtual_kind or "")
+            if spec is None or spec.display_name is None:
+                continue
+            info = app_state.get(spec.info_key, {})
+            url = _virtual_registry.resolve_endpoint_url(info, spec.default_port)
+            if url:
+                endpoints[spec.display_name] = url
+
+    # Return sorted by teardown_priority (grafana first, then prometheus, loki)
+    specs_with_endpoints = [
+        (s, endpoints[s.display_name])
+        for s in _virtual_registry._REGISTRY.values()
+        if s.display_name and s.display_name in endpoints
+    ]
+    specs_with_endpoints.sort(key=lambda x: x[0].teardown_priority)
+    return [f"{spec.display_name:<12} {url}" for spec, url in specs_with_endpoints]
 
 
 def jjx_pytest_env_args(charm_root: Path) -> list[str]:
@@ -231,7 +283,6 @@ def jjx_cli() -> int:
 
     # Extract -p flag for port publishing.
     publish = None
-    publish_output = ""
     if "-p" in jjx_args:
         idx = jjx_args.index("-p")
         if idx + 1 < len(jjx_args):
@@ -266,10 +317,7 @@ def jjx_cli() -> int:
     env.pop("VIRTUAL_ENV", None)
     if publish:
         env["JJX_PUBLISH"] = publish
-        external_port, internal_port = publish.split(":", 1)
-        publish_output = (
-            f"\n\nPublished container port {internal_port} to 127.0.0.1:{external_port}"
-        )
+        external_port, _ = publish.split(":", 1)
     cmd = [
         "uv",
         "run",
@@ -287,10 +335,18 @@ def jjx_cli() -> int:
         if container is None:
             teardown_all_models()
             return proc.returncode
-        print(
-            f"\nStarted workload container {container.name} with IP {container.ip_address}{publish_output}",
-            flush=True,
-        )
+        if publish:
+            workload_line = f"Workload running at 127.0.0.1:{external_port}"
+        else:
+            workload_line = f"Workload running at {container.ip_address}"
+        print(f"\n{workload_line}", flush=True)
+        # List user-facing endpoints for virtual COS charms (loki, etc.)
+        # so the user can interact with them directly.
+        cos_lines = _cos_endpoint_lines()
+        if cos_lines:
+            print(flush=True)
+            for line in cos_lines:
+                print(line, flush=True)
         if detach:
             print("\nRun 'jjx down' to tear down")
             return proc.returncode
