@@ -500,6 +500,11 @@ def _docker_container_ip(container_name: str) -> str:
 
 
 def _running_workload_container() -> ContainerDetails | None:
+    """Find the charm's workload container, if it is running.
+
+    Only non-virtual apps (the real charm) are considered — virtual charm
+    containers (postgres, COS) should not keep jjx alive on their own.
+    """
     state = _load_state()
     for model_state in state.get("models", {}).values():
         apps = model_state.get("apps", {})
@@ -507,6 +512,8 @@ def _running_workload_container() -> ContainerDetails | None:
             continue
         for app_state in apps.values():
             if not isinstance(app_state, dict):
+                continue
+            if app_state.get("virtual"):
                 continue
             container_name = app_state.get("container_name")
             if not isinstance(container_name, str) or not container_name:
