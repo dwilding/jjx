@@ -58,10 +58,10 @@ For more detail about the workload, see [Study your application](https://canonic
 > This gives you a prompt that feels like bash and has first-class support for Pebble commands. For example:
 >
 > <pre>
-> <b>pebble:/#</b> ls api_demo_server/
-> __init__.py
-> app.py
-> database.py
+> <b>pebble:/#</b> ps
+> <b>PID</b>  <b>TTY</b>  <b>TIME</b> <b>CMD</b>
+>   1 ?      00:00:00 pebble
+>  17 ?      00:00:00 uvicorn
 > <b>pebble:/#</b> services
 > <b>SERVICE</b>  <b>STARTUP</b>  <b>CURRENT</b>
 > fastapi  enabled  active
