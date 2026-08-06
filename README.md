@@ -77,7 +77,7 @@ Then run the workload again, this time using the full suite of integration tests
 uvx jjx
 ```
 
-In addition to deploying the charm and integrating it with PostgreSQL, the tests deploy [COS Lite](https://charmhub.io/cos-lite) and integrate the charm with Grafana, Prometheus, and Loki. The output of `uvx jjx` includes the locations of these observability apps.
+In addition to deploying the charm and integrating it with PostgreSQL, the tests deploy [COS Lite](https://charmhub.io/cos-lite) and integrate the charm with Grafana, Prometheus, and Loki. The output of `uvx jjx` shows how to access these observability apps.
 
 Finally, open Grafana and Prometheus in your browser and explore the available data. For ideas, see [Inspect the Grafana dashboard](https://canonical.com/juju/docs/ops/latest/tutorial/from-zero-to-hero-write-your-first-kubernetes-charm/observe-your-charm-with-cos-lite/#inspect-the-grafana-dashboard) and [Inspect metrics in Prometheus](https://canonical.com/juju/docs/ops/latest/tutorial/from-zero-to-hero-write-your-first-kubernetes-charm/observe-your-charm-with-cos-lite/#inspect-metrics-in-prometheus) in the "zero to hero" tutorial.
 
@@ -95,7 +95,7 @@ This runs the charm's integration tests and starts a Docker container for the wo
 
 The workload stays running until you press Ctrl-C.
 
-The output includes the IP address of the workload. You can play with the workload by connecting to this address.
+The output shows the IP address of the workload. You can play with the workload by connecting to this address.
 
 Alternatively, to play with the workload on localhost, specify a port mapping:
 
