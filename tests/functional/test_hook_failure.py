@@ -86,7 +86,7 @@ def test_pebble_ready_crash_sets_error_status(k8s_2_configurable):
         text=True,
     )
     assert result.returncode != 0
-    assert "error state" in result.stderr
+    assert 'hook failed: "demo-server-pebble-ready"' in result.stderr
     # TEARDOWN
     command = [
         *JUJU,

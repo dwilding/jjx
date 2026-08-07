@@ -209,7 +209,7 @@ would deadlock on hook tool subprocesses.
 
 ### hook failures
 
-When a hook exits non-zero, jjx sets unit and app status to `error` with the hook's stderr as the message, then raises. This mirrors real Juju's error status, but jjx does not retry failed hooks or implement `juju resolve` — the error status is sticky until the app is removed or a subsequent hook overwrites it.
+When a hook exits non-zero, jjx sets unit and app status to `error` with the message `hook failed: "<hook-name>"`, matching real Juju's format. The actual exception traceback is in `juju debug-log` (ops logs it via `juju-log`). jjx does not retry failed hooks or implement `juju resolve` — the error status is sticky until the app is removed or a subsequent hook overwrites it.
 
 For the background `pebble-ready` subprocess, the exception is caught (the process can't report to the test directly), but the error status has already been written to state, so `juju wait-for` fails fast instead of timing out.
 

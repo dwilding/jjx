@@ -1179,17 +1179,17 @@ def _run_charm_event(
         _append_log(model_state, f"event {hook_name} stderr:\n{proc.stderr.strip()}")
 
     if proc.returncode != 0:
-        # Mirror real Juju: set error status before raising.
-        error_message = (
-            proc.stderr.strip() or f"hook {hook_name} failed with exit code {proc.returncode}"
-        )
+        # Mirror real Juju: set error status with a generic message. The
+        # actual exception is in juju debug-log (ops logs it via juju-log).
+        error_status = _status_dict("error", f'hook failed: "{hook_name}"')
         app_state = model_state["apps"][app_name]
-        error_status = _status_dict("error", error_message)
         app_state["unit_status"] = error_status
         app_state["app_status"] = error_status
         app_state["updated_at"] = _now_iso()
         _save_state(state)
-        raise CliError(error_message)
+        raise CliError(
+            proc.stderr.strip() or f"hook {hook_name} failed with exit code {proc.returncode}"
+        )
     _save_state(state)
 
 
