@@ -207,6 +207,12 @@ atomic (temp file + `os.replace`) to prevent torn JSON if a `juju status` read
 overlaps a background write. No file locking — a flock around event dispatch
 would deadlock on hook tool subprocesses.
 
+### hook failures
+
+When a hook exits non-zero, jjx sets unit and app status to `error` with the message `hook failed: "<hook-name>"`, matching real Juju's format. The actual exception traceback is in `juju debug-log` (ops logs it via `juju-log`). jjx does not retry failed hooks or implement `juju resolve` — the error status is sticky until the app is removed or a subsequent hook overwrites it.
+
+For the background `pebble-ready` subprocess, the exception is caught (the process can't report to the test directly), but the error status has already been written to state, so `juju wait-for` fails fast instead of timing out.
+
 Config flow:
 
 1. update state
@@ -236,6 +242,7 @@ When `jjx down` tears down all models, models are destroyed in reverse creation 
 - real Pebble API surface through Unix socket
 - hook tools invoked as subprocess executables
 - synchronous event execution (no queue, no background agent), except `pebble-ready` which is dispatched asynchronously after a minimum 3.0s delay (see "async pebble-ready" above)
+- hook failures set error status; no retry or `juju resolve` (see "hook failures" above)
 - deterministic single-unit semantics
 - charm code that connects to loopback addresses (`127.0.0.1`, `localhost`, `::1`) reaches the workload container without exposing container ports on the host (the charm runner shares the workload's network namespace)
 

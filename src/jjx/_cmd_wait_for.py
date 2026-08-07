@@ -40,7 +40,12 @@ def wait_for(args: list[str], model: str | None) -> int:
         state = _engine._load_state()
         app_state = state.get("models", {}).get(model_name, {}).get("apps", {}).get(app_name)
         if app_state:
-            status = (app_state.get("app_status") or {}).get("status")
+            app_status = app_state.get("app_status") or {}
+            status = app_status.get("status")
+            if status == "error":
+                raise _engine.CliError(
+                    f"application {app_name} is in error state: {app_status.get('message', '')}"
+                )
             if status in {"active", "blocked"}:
                 return 0
         time.sleep(0.25)
