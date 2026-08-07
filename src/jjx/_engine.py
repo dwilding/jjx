@@ -26,13 +26,15 @@ from urllib.request import Request, urlopen
 
 import yaml
 
+from ._version import PEBBLE_VERSION
+
 
 STATE_DIR_NAME = ".jjx"
 STATE_FILE_NAME = "state.json"
 HOOK_TOOLS_DIR_NAME = "hook-tools"
 GITIGNORE_FILE_NAME = ".gitignore"
 
-PEBBLE_RELEASES_API = "https://api.github.com/repos/canonical/pebble/releases/latest"
+PEBBLE_RELEASES_API = "https://api.github.com/repos/canonical/pebble/releases/tags/{tag}"
 PEBBLE_RELEASES_DOWNLOAD = "https://github.com/canonical/pebble/releases/download/{tag}/{asset}"
 
 # Charm runner container image. This is a chiseled Ubuntu image that contains
@@ -130,7 +132,7 @@ def _save_state(state: dict[str, Any]) -> None:
 def _cleanup_model_artifacts() -> None:
     """Remove all project-local runtime state from .jjx/.
 
-    The pebble cache at ~/.cache/jjx/pebble-bin is preserved for reuse.
+    The versioned pebble cache at ~/.cache/jjx/pebble-bin-<version> is preserved for reuse.
     """
     shutil.rmtree(_jjx_dir(), ignore_errors=True)
 
@@ -850,8 +852,18 @@ def _wait_for_charm_runner_socket(
     raise CliError(f"timed out waiting for pebble socket in charm runner {charm_runner_name}")
 
 
+def _pebble_cache_path() -> Path:
+    """Return the cache path for the pinned Pebble version.
+
+    The path is versioned (e.g. ``pebble-bin-v1.32.1``) so bumping
+    :data:`jjx._version.PEBBLE_VERSION` triggers a fresh download rather than
+    reusing a stale binary from a previous jjx release.
+    """
+    return Path.home() / ".cache" / "jjx" / f"pebble-bin-{PEBBLE_VERSION}"
+
+
 def _resolve_pebble_binary() -> Path:
-    cache_path = Path.home() / ".cache" / "jjx" / "pebble-bin"
+    cache_path = _pebble_cache_path()
     if cache_path.exists():
         return cache_path
 
@@ -866,7 +878,10 @@ def _resolve_pebble_binary() -> Path:
         raise CliError(f"unsupported architecture for pebble download: {os.uname().machine}")
 
     try:
-        request = Request(PEBBLE_RELEASES_API, headers={"User-Agent": "jjx"})
+        request = Request(
+            PEBBLE_RELEASES_API.format(tag=PEBBLE_VERSION),
+            headers={"User-Agent": "jjx"},
+        )
         with urlopen(request, timeout=30) as response:
             release = json.loads(response.read().decode("utf-8"))
     except (HTTPError, URLError, TimeoutError, ValueError) as exc:
