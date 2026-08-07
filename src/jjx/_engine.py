@@ -1177,12 +1177,20 @@ def _run_charm_event(
         _append_log(model_state, f"event {hook_name} stdout:\n{proc.stdout.strip()}")
     if proc.stderr.strip():
         _append_log(model_state, f"event {hook_name} stderr:\n{proc.stderr.strip()}")
-    _save_state(state)
 
     if proc.returncode != 0:
-        raise CliError(
+        # Mirror real Juju: set error status before raising.
+        error_message = (
             proc.stderr.strip() or f"hook {hook_name} failed with exit code {proc.returncode}"
         )
+        app_state = model_state["apps"][app_name]
+        error_status = _status_dict("error", error_message)
+        app_state["unit_status"] = error_status
+        app_state["app_status"] = error_status
+        app_state["updated_at"] = _now_iso()
+        _save_state(state)
+        raise CliError(error_message)
+    _save_state(state)
 
 
 def _create_pebble_socket_symlink(

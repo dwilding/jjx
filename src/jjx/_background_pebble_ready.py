@@ -29,9 +29,7 @@ def main() -> int:
     try:
         _engine._run_pebble_ready_event(model_name, app_name, workload_name)
     except Exception:
-        # Swallow errors — the background process can't report them to the
-        # test. A failed pebble-ready means the container isn't ready, which
-        # is the failure mode the test should catch anyway.
+        # _run_charm_event has already set error status in state.
         return 1
 
     # Clean up the PID marker file.
