@@ -118,7 +118,7 @@ The `.charm` file passed to deploy is a trigger only. `jjx` does not inspect or 
 - `./.jjx/prom-config-<app>/` (Prometheus config directory, bind-mounted into the Prometheus container)
 - `./.jjx/grafana-config-<app>/` (Grafana provisioning directory, bind-mounted into the Grafana container)
 
-`jjx` also caches the Pebble binary at `~/.cache/jjx/pebble-bin`, downloaded from canonical/pebble GitHub Releases on first use. This cache is shared across projects and persists across model teardowns to enable reuse across multiple deployments.
+`jjx` caches the Pebble binary at `~/.cache/jjx/pebble-bin-<version>`, where `<version>` is the Pebble release tag pinned in `jjx/_version.py`. The binary is downloaded from the canonical/pebble GitHub Release for that tag on first use. The cache is shared across projects and persists across model teardowns to enable reuse across multiple deployments. Bumping the pinned version before a jjx release causes a fresh download (the old versioned cache entry is left behind).
 
 Notes on generated runtime files:
 
@@ -127,7 +127,7 @@ Notes on generated runtime files:
 - `JJX_STATE_DIR` is set to `/jjx` (the in-container mount point of `.jjx/`) in the charm runner environment. Hook tools call back into `jjx` to read and write state; this env var lets them locate state directly.
 - `./.jjx/charm/.unit-state.db` is created by charm runtime state persistence (written by `ops` via `sqlite3` to `JUJU_CHARM_DIR/.unit-state.db`, which inside the charm runner is `/charm/.unit-state.db`).
 
-When a model is torn down, jjx kills any background pebble-ready processes for that model's apps (via `.deploy` marker files), removes its containers in priority order, and removes the model from state. When the last model is torn down, the entire `./.jjx/` directory is removed. The `~/.cache/jjx/pebble-bin` cache is kept for reuse across subsequent deployments.
+When a model is torn down, jjx kills any background pebble-ready processes for that model's apps (via `.deploy` marker files), removes its containers in priority order, and removes the model from state. When the last model is torn down, the entire `./.jjx/` directory is removed. The `~/.cache/jjx/pebble-bin-<version>` cache is kept for reuse across subsequent deployments.
 
 ### charm runner container
 
