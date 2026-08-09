@@ -23,7 +23,7 @@ test args="tests/unit tests/functional":
 
 [private]
 deps:
-  .scripts/bump_deps.py
+  uv run --script .scripts/bump_deps.py
 
 [private]
 charms:

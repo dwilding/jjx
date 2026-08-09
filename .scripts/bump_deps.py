@@ -1,5 +1,4 @@
-#!/usr/bin/env python3
-"""Bump dependency versions to the latest release published more than 7 days ago."""
+"""Bumps dependency versions to the latest release published more than 7 days ago."""
 
 import json
 import re
