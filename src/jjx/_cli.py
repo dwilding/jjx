@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import re
 import signal
 import subprocess
 import sys
+from pathlib import Path
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -20,11 +20,11 @@ from . import (
     _cmd_debug_log,
     _cmd_deploy,
     _cmd_destroy_model,
+    _cmd_hook_tool,
     _cmd_integrate,
     _cmd_misc,
     _cmd_offer,
     _cmd_remove_application,
-    _cmd_hook_tool,
     _cmd_run,
     _cmd_status,
     _cmd_wait_for,
@@ -132,8 +132,8 @@ def _cos_endpoint_lines() -> list[str]:
 
     state = _engine._load_state()
     endpoints: dict[str, str] = {}
-    for model_name, model_state in state.get("models", {}).items():
-        for app_name, app_state in model_state.get("apps", {}).items():
+    for model_state in state.get("models", {}).values():
+        for app_state in model_state.get("apps", {}).values():
             if not app_state.get("virtual"):
                 continue
             virtual_kind = app_state.get("virtual_kind")
@@ -253,6 +253,7 @@ def _has_pytest_jubilant(charm_root: Path) -> bool:
         cwd=charm_root,
         env=env,
         capture_output=True,
+        check=False,
     )
     return result.returncode == 0
 
@@ -329,7 +330,7 @@ def jjx_cli() -> int:
     ]
 
     try:
-        proc = subprocess.run(cmd, env=env)
+        proc = subprocess.run(cmd, env=env, check=False)
         placeholder_charm.unlink()
         container = _engine._running_workload_container()
         if container is None:

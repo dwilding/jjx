@@ -1,10 +1,11 @@
 import pathlib
-import time
 import subprocess
+import time
 import urllib.request
 
-import jjx
 import helpers_functional as helpers
+
+import jjx
 
 PACKAGE_DIR = pathlib.Path(__file__).parent.parent.parent
 JUJU = [
@@ -30,6 +31,7 @@ def assert_process_count(count: int) -> None:
         command,
         capture_output=True,
         text=True,
+        check=False,
     )
     assert result.returncode == 0, (
         f"'{runtime} top' exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
@@ -45,7 +47,7 @@ def server_up(ip: str, port: int) -> bool:
     url = f"http://{ip}:{port}/version"
     try:
         response = urllib.request.urlopen(url, timeout=2)
-    except Exception:
+    except Exception:  # noqa: BLE001
         return False
     return response.status == 200
 
@@ -120,6 +122,7 @@ def test_pebble_was_unreachable(k8s_2_configurable):
         cwd=k8s_2_configurable,
         capture_output=True,
         text=True,
+        check=False,
     )
     assert result.returncode == 0, (
         f"juju debug-log exited with code {result.returncode}\n"
@@ -143,6 +146,7 @@ def test_pebble_services():
         command,
         capture_output=True,
         text=True,
+        check=False,
     )
     assert result.returncode == 0, (
         f"'{runtime} exec' exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
@@ -164,6 +168,7 @@ def test_pebble_logs():
         command,
         capture_output=True,
         text=True,
+        check=False,
     )
     assert result.returncode == 0, (
         f"'{runtime} exec' exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
@@ -184,6 +189,7 @@ def test_server_changes_port(k8s_2_configurable):
         cwd=k8s_2_configurable,
         capture_output=True,
         text=True,
+        check=False,
     )
     assert result.returncode == 0, (
         f"juju config exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
@@ -195,7 +201,7 @@ def test_server_changes_port(k8s_2_configurable):
         *JUJU,
         "config",
         "fastapi-demo",
-        f"server-port={str(port + 1)}",
+        f"server-port={port + 1!s}",
     ]
     subprocess.run(
         command,

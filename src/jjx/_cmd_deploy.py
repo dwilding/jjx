@@ -19,7 +19,6 @@ from . import (
     _virtual_registry,
 )
 
-
 # Charm names that jjx handles as "virtual" charms — no real charm code is
 # run; instead jjx manages the workload and relation data directly.
 _VIRTUAL_CHARMS = {
@@ -73,6 +72,7 @@ def _copy_image_pebble_layers(image: str, dest_layers_dir: Path) -> None:
             [_engine._CONTAINER_BINARY, "create", "--name", container_name, image, "true"],
             capture_output=True,
             text=True,
+            check=False,
         )
         # Copy the layers directory out of the image.
         # Non-zero exit just means the image has no layers directory — that's fine.
@@ -85,12 +85,14 @@ def _copy_image_pebble_layers(image: str, dest_layers_dir: Path) -> None:
             ],
             capture_output=True,
             text=True,
+            check=False,
         )
     finally:
         subprocess.run(
             [_engine._CONTAINER_BINARY, "rm", "--force", container_name],
             capture_output=True,
             text=True,
+            check=False,
         )
 
 

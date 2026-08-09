@@ -64,7 +64,7 @@ def run(args: list[str], model: str | None) -> int:
     # Parse unit name: "app/0" or "app/leader"
     if "/" not in unit:
         raise _engine.CliError(f"invalid unit name: {unit}")
-    app_name, _, unit_id = unit.partition("/")
+    app_name, _, _unit_id = unit.partition("/")
 
     apps = model_state.get("apps", {})
     if app_name not in apps:

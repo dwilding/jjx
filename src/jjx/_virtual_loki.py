@@ -29,7 +29,6 @@ from typing import Any
 
 from . import _engine
 
-
 LOKI_IMAGE = "docker.io/grafana/loki:3.5.5"
 LOKI_PORT = 3100
 

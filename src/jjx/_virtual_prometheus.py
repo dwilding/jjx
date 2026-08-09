@@ -28,7 +28,6 @@ import yaml
 
 from . import _engine
 
-
 PROMETHEUS_IMAGE = "docker.io/prom/prometheus:v3.5.0"
 PROMETHEUS_PORT = 9090
 

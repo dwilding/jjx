@@ -1,17 +1,17 @@
-from ._version import __version__
-from ._cli import run_hook_tool
-from ._engine import _CONTAINER_BINARY
+from . import (
+    _virtual_grafana,
+    _virtual_loki,
+    _virtual_postgres,
+    _virtual_prometheus,
+    _virtual_traefik,
+)
 
 # Register all virtual charms. This must happen before any command module
 # uses the registry. Importing here ensures registration on package import.
 from . import _virtual_registry as _vr
-from . import (
-    _virtual_postgres,
-    _virtual_loki,
-    _virtual_prometheus,
-    _virtual_grafana,
-    _virtual_traefik,
-)
+from ._cli import run_hook_tool
+from ._engine import _CONTAINER_BINARY
+from ._version import __version__
 
 _vr.register(
     _vr.VirtualCharmSpec(

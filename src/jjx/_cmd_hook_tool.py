@@ -307,7 +307,7 @@ def _relation_ids(tool_args: list[str], model_state: dict[str, Any]) -> int:
 
     result = []
     for rel in _engine._relations(model_state):
-        for app_name, ep in rel.get("endpoints", {}).items():
+        for ep in rel.get("endpoints", {}).values():
             if ep == endpoint:
                 result.append(f"{endpoint}:{rel['id']}")
                 break

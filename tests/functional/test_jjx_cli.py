@@ -172,6 +172,7 @@ def test_jjx_detach_then_down(k8s_2_configurable):
         cwd=k8s_2_configurable,
         capture_output=True,
         text=True,
+        check=False,
     )
     assert result.returncode == 0, (
         f"jjx exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
@@ -195,6 +196,7 @@ def test_jjx_detach_then_down(k8s_2_configurable):
         cwd=k8s_2_configurable,
         capture_output=True,
         text=True,
+        check=False,
     )
     assert result.returncode == 0, (
         f"jjx down exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
@@ -223,6 +225,7 @@ def test_jjx_detach_then_rerun(k8s_2_configurable):
         cwd=k8s_2_configurable,
         capture_output=True,
         text=True,
+        check=False,
     )
     assert result.returncode == 1
     assert "Workload running at " not in result.stdout
@@ -240,6 +243,7 @@ def test_jjx_detach_then_rerun(k8s_2_configurable):
         cwd=k8s_2_configurable,
         capture_output=True,
         text=True,
+        check=False,
     )
     assert result.returncode == 0, (
         f"jjx down exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
@@ -265,6 +269,7 @@ def test_jjx_pytest_fail(k8s_2_configurable):
         cwd=k8s_2_configurable,
         capture_output=True,
         text=True,
+        check=False,
     )
     assert result.returncode == 1
     # The container should still be running because `test_deploy` should have passed.
@@ -282,6 +287,7 @@ def test_jjx_pytest_fail(k8s_2_configurable):
         cwd=k8s_2_configurable,
         capture_output=True,
         text=True,
+        check=False,
     )
     assert result.returncode == 0, (
         f"jjx down exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
@@ -306,6 +312,7 @@ def test_jjx_pytest_select(k8s_2_configurable):
         cwd=k8s_2_configurable,
         capture_output=True,
         text=True,
+        check=False,
     )
     assert result.returncode == 0, (
         f"jjx exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
@@ -324,6 +331,7 @@ def test_jjx_pytest_select(k8s_2_configurable):
         cwd=k8s_2_configurable,
         capture_output=True,
         text=True,
+        check=False,
     )
     assert result.returncode == 0, (
         f"jjx down exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
@@ -345,6 +353,7 @@ def test_jjx_pytest_select_verbose(k8s_2_configurable):
         cwd=k8s_2_configurable,
         capture_output=True,
         text=True,
+        check=False,
     )
     assert result.returncode == 0, (
         f"jjx exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
@@ -379,6 +388,7 @@ def test_jjx_no_deploy(k8s_2_configurable):
         cwd=k8s_2_configurable,
         capture_output=True,
         text=True,
+        check=False,
     )
     assert result.returncode == 1
     assert "Workload running at " not in result.stdout

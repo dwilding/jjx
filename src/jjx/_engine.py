@@ -28,7 +28,6 @@ import yaml
 
 from ._version import PEBBLE_VERSION
 
-
 STATE_DIR_NAME = ".jjx"
 STATE_FILE_NAME = "state.json"
 HOOK_TOOLS_DIR_NAME = "hook-tools"
@@ -419,6 +418,7 @@ def _docker_rm(container_name: str) -> None:
         [_CONTAINER_BINARY, "rm", "--force", container_name],
         capture_output=True,
         text=True,
+        check=False,
     )
     # Wait for the container to be fully removed. Without this, a subsequent
     # _docker_run with the same name can race with the old container's cleanup,
@@ -432,6 +432,7 @@ def _docker_rm(container_name: str) -> None:
             [_CONTAINER_BINARY, "inspect", "--format", "{{.State.Status}}", container_name],
             capture_output=True,
             text=True,
+            check=False,
         )
         if result.returncode != 0:
             # Container no longer exists according to inspect.
@@ -448,6 +449,7 @@ def _docker_rm(container_name: str) -> None:
                 ],
                 capture_output=True,
                 text=True,
+                check=False,
             )
             if not ps_result.stdout.strip():
                 break
@@ -584,6 +586,7 @@ def _python_version(python_binary: Path) -> str:
         ],
         capture_output=True,
         text=True,
+        check=False,
     )
     if proc.returncode != 0:
         raise CliError(
@@ -688,6 +691,7 @@ def _ensure_charm_runner_image() -> None:
         [_CONTAINER_BINARY, "image", "inspect", CHARM_RUNNER_IMAGE],
         capture_output=True,
         text=True,
+        check=False,
     )
     if result.returncode == 0:
         return
@@ -839,11 +843,14 @@ def _wait_for_charm_runner_socket(
                 charm_runner_name,
                 container_python,
                 "-c",
-                "import socket; s=socket.socket(socket.AF_UNIX); s.settimeout(0.5); "
-                "s.connect('/jjx/socket'); s.close()",
+                (
+                    "import socket; s=socket.socket(socket.AF_UNIX); s.settimeout(0.5); "
+                    "s.connect('/jjx/socket'); s.close()"
+                ),
             ],
             capture_output=True,
             text=True,
+            check=False,
         )
         if result.returncode == 0:
             return
@@ -1204,9 +1211,11 @@ def _create_pebble_socket_symlink(
         [
             container_python,
             "-c",
-            f"import os, pathlib; pathlib.Path({pebble_socket_dir!r}).mkdir(parents=True, exist_ok=True); "
-            f"src='/jjx/socket'; dst={pebble_socket_dir!r}+'/pebble.socket'; "
-            f"os.symlink(src, dst) if not os.path.exists(dst) else None",
+            (
+                f"import os, pathlib; pathlib.Path({pebble_socket_dir!r}).mkdir(parents=True, exist_ok=True); "
+                f"src='/jjx/socket'; dst={pebble_socket_dir!r}+'/pebble.socket'; "
+                f"os.symlink(src, dst) if not os.path.exists(dst) else None"
+            ),
         ],
     )
 

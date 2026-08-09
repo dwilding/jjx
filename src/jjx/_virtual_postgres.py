@@ -20,7 +20,6 @@ from typing import Any
 
 from . import _engine
 
-
 POSTGRES_IMAGE = "docker.io/library/postgres:16"
 POSTGRES_PORT = 5432
 

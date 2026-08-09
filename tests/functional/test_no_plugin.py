@@ -69,6 +69,7 @@ def test_jjx_cli_needs_plugin(k8s_2_configurable):
         cwd=k8s_2_configurable,
         capture_output=True,
         text=True,
+        check=False,
     )
     assert result.returncode == 1
     assert "ERROR: pytest-jubilant is not in the 'integration' dependency group." in result.stderr

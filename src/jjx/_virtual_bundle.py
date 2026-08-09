@@ -17,7 +17,6 @@ from typing import Any
 
 from . import _engine, _virtual_registry
 
-
 # Virtual bundles: map bundle name to the list of (app_name, virtual_kind)
 # components that should be deployed.
 _VIRTUAL_BUNDLES = {
