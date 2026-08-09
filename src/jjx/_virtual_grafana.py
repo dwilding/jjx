@@ -26,7 +26,6 @@ import yaml
 
 from . import _engine
 
-
 GRAFANA_IMAGE = "docker.io/grafana/grafana:12.1.0"
 GRAFANA_PORT = 3000
 
@@ -226,7 +225,7 @@ def import_dashboards(
             dash_path = dash_dir / f"{safe_name}.json"
             dash_path.write_text(json.dumps(dashboard), encoding="utf-8")
             dash_path.chmod(0o666)
-        except Exception:
+        except Exception:  # noqa: BLE001, S110
             pass
 
 

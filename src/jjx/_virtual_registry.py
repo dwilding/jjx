@@ -12,10 +12,10 @@ registry instead of maintaining separate if/elif chains.
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Callable
-
+from typing import Any
 
 # Type aliases for virtual charm functions.
 StartFunc = Callable[[str, str], dict[str, Any]]
@@ -127,7 +127,7 @@ def resolve_endpoint_url(info: dict[str, Any], default_port: int) -> str:
                 host = details.ip_address
                 info["host"] = details.ip_address
                 info["ip_address"] = details.ip_address
-        except Exception:
+        except Exception:  # noqa: BLE001, S110
             pass
     if host:
         return f"http://{host}:{port}"

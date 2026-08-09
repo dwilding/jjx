@@ -28,7 +28,7 @@ def main() -> int:
 
     try:
         _engine._run_pebble_ready_event(model_name, app_name, workload_name)
-    except Exception:
+    except Exception:  # noqa: BLE001
         # _run_charm_event has already set error status in state.
         return 1
 

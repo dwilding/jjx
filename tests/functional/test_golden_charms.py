@@ -36,6 +36,7 @@ def test_httpbin_demo(temp_dir):
         cwd=charm_dir,
         capture_output=True,
         text=True,
+        check=False,
     )
     assert result.returncode == 0, (
         f"jjx exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
@@ -59,6 +60,7 @@ def test_httpbin_demo(temp_dir):
         cwd=charm_dir,
         capture_output=True,
         text=True,
+        check=False,
     )
     assert result.returncode == 0, (
         f"jjx down exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
@@ -95,6 +97,7 @@ def test_fastapi_demo(temp_dir):
         cwd=charm_dir,
         capture_output=True,
         text=True,
+        check=False,
     )
     assert result.returncode == 0, (
         f"jjx exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
@@ -140,6 +143,7 @@ def test_fastapi_demo(temp_dir):
         cwd=charm_dir,
         capture_output=True,
         text=True,
+        check=False,
     )
     assert result.returncode == 0, (
         f"jjx down exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
@@ -165,6 +169,7 @@ def test_fastapi_demo_deselect_deploy(temp_dir):
         cwd=charm_dir,
         capture_output=True,
         text=True,
+        check=False,
     )
     assert result.returncode == 1
     assert "Workload running at " not in result.stdout

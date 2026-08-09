@@ -28,6 +28,7 @@ def assert_no_container(container_name: str) -> None:
         command,
         capture_output=True,
         text=True,
+        check=False,
     )
     # Docker returns 1. Podman returns 125.
     assert result.returncode != 0, f"container {container_name} still exists"
@@ -100,6 +101,7 @@ def container_ip(container_name: str) -> str:
         command,
         capture_output=True,
         text=True,
+        check=False,
     )
     assert result.returncode == 0, (
         f"inspect exited with code {result.returncode}\n"

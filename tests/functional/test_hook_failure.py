@@ -3,8 +3,9 @@ import re
 import subprocess
 import time
 
-import jjx
 import helpers_functional as helpers
+
+import jjx
 
 PACKAGE_DIR = pathlib.Path(__file__).parent.parent.parent
 JUJU = [
@@ -84,6 +85,7 @@ def test_pebble_ready_crash_sets_error_status(k8s_2_configurable):
         cwd=k8s_2_configurable,
         capture_output=True,
         text=True,
+        check=False,
     )
     assert result.returncode != 0
     assert 'hook failed: "demo-server-pebble-ready"' in result.stderr
