@@ -232,6 +232,7 @@ Destroy flow:
 1. kill any background pebble-ready processes (via `.jjx/*.deploy` marker files)
 2. remove containers in teardown-priority order: COS containers (grafana, prometheus, loki) → postgres → workload → charm runners
 3. clean up any stragglers (orphaned containers not tracked in state)
+   - this includes `jjx-layer-copy-*` throwaway containers created by deploy to extract baked-in Pebble layers from the OCI image; they are removed in a `finally` block when deploy completes, but a Ctrl-C mid-deploy can orphan them, so full teardown (`jjx down` or Ctrl-C) sweeps for them by name prefix
 4. remove this model from state; if it's the last model, remove `./.jjx/` entirely
 
 When `jjx down` tears down all models, models are destroyed in reverse creation order so that COS models (created later) are torn down first.

@@ -119,6 +119,10 @@ def teardown_all_models() -> None:
     # produces a more natural teardown order: COS containers first.
     for model_name in reversed(list(state.get("models", {}))):
         _cmd_destroy_model.destroy_model([model_name])
+    # Sweep for orphaned jjx-layer-copy-* helper containers. These are created
+    # by deploy to extract Pebble layers and removed in a finally block, but a
+    # Ctrl-C mid-deploy can leave them behind. They aren't tracked in state.
+    _engine._remove_layer_copy_containers()
 
 
 def _cos_endpoint_lines() -> list[str]:
