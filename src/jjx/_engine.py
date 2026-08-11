@@ -546,6 +546,39 @@ def _docker_list_model_containers(model_name: str) -> list[str]:
     return [name for name in names if name.startswith(model_prefix)]
 
 
+# Prefix used by _cmd_deploy._copy_image_pebble_layers for its throwaway
+# helper container. The helper is created with `docker create` and removed in
+# a `finally` block, but if the process is interrupted (e.g. Ctrl-C) between
+# create and the `finally`, the container is orphaned. It is not tracked in
+# state.json (it's intentionally transient), so teardown must sweep for it by
+# name prefix.
+_LAYER_COPY_PREFIX = "jjx-layer-copy-"
+
+
+def _remove_layer_copy_containers() -> None:
+    """Remove any orphaned ``jjx-layer-copy-*`` helper containers.
+
+    These throwaway containers are created by deploy to extract baked-in
+    Pebble layers from an OCI image. They are removed in a ``finally`` block
+    when deploy runs to completion, but a Ctrl-C mid-deploy can orphan them.
+    They are not tracked in state, so this sweep is the only way they get
+    cleaned up.
+    """
+    try:
+        proc = subprocess.run(
+            [_CONTAINER_BINARY, "ps", "--all", "--format", "{{.Names}}"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError:
+        return
+    for line in proc.stdout.splitlines():
+        name = line.strip()
+        if name.startswith(_LAYER_COPY_PREFIX):
+            _docker_rm(name)
+
+
 def _resolve_uv_python() -> Path:
     """Find a uv-managed Python installation to bind-mount into the charm runner.
 
