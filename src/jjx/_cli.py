@@ -284,6 +284,15 @@ def jjx_cli() -> int:
             return 1
     teardown_all_models()
 
+    # Preflight: fail fast if Docker is not available, rather than letting pytest
+    # surface a confusing 'failed to connect to the docker API' error later.
+    try:
+        _engine._check_docker_available()
+    except _engine.CliError as exc:
+        if exc.message:
+            sys.stderr.write(exc.message + "\n")
+        return exc.exit_code
+
     detach = "-d" in jjx_args
 
     # Extract -p flag for port publishing.
