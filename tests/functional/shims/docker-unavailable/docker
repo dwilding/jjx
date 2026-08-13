@@ -1,0 +1,3 @@
+#!/bin/sh
+# Shim that simulates Docker being installed but the daemon not running.
+exit 1

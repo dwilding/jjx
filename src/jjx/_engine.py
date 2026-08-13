@@ -340,6 +340,31 @@ def _status_dict(
     return {"status": status, "message": message, "status-data": {}}
 
 
+def _check_docker_available() -> None:
+    """Fail fast with an actionable message if the Docker daemon is not reachable.
+
+    Runs ``docker info`` so the user gets an immediate, clear error instead of a
+    confusing ``failed to connect to the docker API`` surfaced later from pytest.
+    Raises :class:`CliError` if the ``docker`` binary is missing or the daemon is
+    not running.
+    """
+    if shutil.which(_CONTAINER_BINARY) is None:
+        raise CliError(
+            f"ERROR: '{_CONTAINER_BINARY}' not found on PATH. Install Docker and try again."
+        )
+    try:
+        subprocess.run(
+            [_CONTAINER_BINARY, "info"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError:
+        raise CliError(
+            "ERROR: Docker is not running. Start the Docker daemon and try again."
+        ) from None
+
+
 def _docker_run(
     image: str,
     container_name: str,
