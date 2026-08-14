@@ -18,6 +18,8 @@
 
 import dataclasses
 import logging
+import time
+import urllib.error
 
 import ops
 
@@ -91,7 +93,17 @@ class FastAPIDemoCharm(ops.CharmBase):
             logger.info("Unable to connect to Pebble: %s", e)
             self.unit.status = ops.MaintenanceStatus("Waiting for Pebble in workload container")
             return
-        version = fastapi_demo.get_version(config.server_port)
+        for attempt in range(3):
+            if attempt:
+                time.sleep(1)
+            try:
+                version = fastapi_demo.get_version(config.server_port)
+                break
+            except urllib.error.URLError:
+                logger.info("Workload not yet available (attempt %d)", attempt + 1)
+        else:
+            logger.error("The workload was not available within the expected time")
+            raise RuntimeError("workload is not available")
         self.unit.set_workload_version(version)
         self.unit.status = ops.ActiveStatus()
 
