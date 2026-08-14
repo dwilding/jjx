@@ -46,6 +46,16 @@ charms:
   cd tests/functional/charms/k8s-2-configurable
   UV_NO_CONFIG=1 tox -e format,lint,unit
 
+pre-release:
+  @echo 'Do these steps before each release. If any step fails, stop and investigate the failure - don'\''t continue the process.'
+  @echo ''
+  @echo '1. `just deps`'
+  @echo '2. `just format`'
+  @echo '3. `just lint`'
+  @echo '4. `just test`'
+  @echo '5. `just pebble`, then `just functional` if `PEBBLE_VERSION` changed'
+  @echo '6. `just charms`, then `just functional` if any files changed'
+
 [private]
 clean-docker:
   docker ps --all --quiet | xargs --no-run-if-empty docker rm --force
