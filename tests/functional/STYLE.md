@@ -8,20 +8,10 @@ These conventions keep functional tests scannable and consistent. Follow them wh
 - Use body comments to mark the sequence of steps. Short separate sentences. No parentheticals or semicolons.
 - If a comment needs a second sentence for context, put it on its own line.
 - Use `# TEARDOWN` to mark the start of the cleanup section at the end of a test.
+- No pre-test cleanup. The `cleanup_leaked_containers` fixture in `conftest.py` removes leftover containers at the end of the session, and each test's TEARDOWN section handles its own cleanup.
 
 ```python
 def test_something(k8s_2_configurable):
-    # Clean up any deployed apps from previous tests.
-    command = [
-        jjx.container_runtime(),
-        "rm",
-        "--force",
-        CONTAINER_NAME,
-    ]
-    subprocess.run(
-        command,
-        check=False,
-    )
     # Deploy the app.
     ...
     # TEARDOWN
@@ -36,6 +26,78 @@ def test_something(k8s_2_configurable):
         check=True,
     )
 ```
+
+## Teardown robustness
+
+- Wrap the body of a test in `try/finally` when it deploys containers.
+- Put the `# TEARDOWN` section inside the `try` block. It runs on the happy path.
+- The safety-net cleanup in `finally` depends on how the test runs jjx:
+  - `jjx -d` (blocking `subprocess.run`): the process has already exited. Put a `jjx down` call in `finally`. It uses `check=False` and `capture_output=True`. It must not raise.
+  - `jjx` (long-running `Popen`): the process is still alive. Put `proc.kill()` in `finally`. Killing the process triggers jjx's signal handler, which tears down containers.
+- Do not assert on the safety-net call's output. Assertions belong in the TEARDOWN section.
+
+```python
+def test_something(temp_dir):
+    ...
+    result = subprocess.run(
+        command,
+        cwd=charm_dir,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    try:
+        assert result.returncode == 0, ...
+        ...
+        # TEARDOWN
+        command = [...]
+        result = subprocess.run(
+            command,
+            cwd=charm_dir,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, ...
+    finally:
+        # Safety net for jjx -d: run jjx down in case an assertion
+        # failed before TEARDOWN completed.
+        command = [...]
+        subprocess.run(
+            command,
+            cwd=charm_dir,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+```
+
+For long-running `jjx` (Popen), the safety net kills the process instead:
+
+```python
+def test_something(k8s_2_configurable):
+    ...
+    proc = subprocess.Popen(
+        command,
+        cwd=k8s_2_configurable,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        start_new_session=True,
+    )
+    try:
+        ...
+        # TEARDOWN
+        proc.send_signal(signal.SIGINT)
+        assert proc.wait(timeout=30) == 130
+    finally:
+        # Safety net for jjx (Popen): kill the process if it's still
+        # running. This triggers jjx's signal handler to tear down.
+        if proc.poll() is None:
+            proc.kill()
+```
+
+- The `cleanup_leaked_containers` fixture in `conftest.py` is a session-wide safety net. It runs once at the end of the test session and removes any leftover `jubilant-*`, `jjx-default-*`, or `jjx-layer-copy-*` containers. Tests should still clean up after themselves. The fixture prevents leaked containers from accumulating across runs. It is session-scoped (not function-scoped) because some test files share a deployed container across multiple tests in a sequence.
 
 ## Subprocess calls
 

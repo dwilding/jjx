@@ -5,8 +5,6 @@ import time
 
 import helpers_functional as helpers
 
-import jjx
-
 PACKAGE_DIR = pathlib.Path(__file__).parent.parent.parent
 JUJU = [
     "uv",
@@ -34,17 +32,6 @@ def test_pebble_ready_crash_sets_error_status(k8s_2_configurable):
             f'{match.group(0)}\n{indent}raise RuntimeError("deliberate pebble-ready crash for testing")',
         )
     )
-    # Clean up any deployed apps from previous tests.
-    command = [
-        jjx.container_runtime(),
-        "rm",
-        "--force",
-        CONTAINER_NAME,
-    ]
-    subprocess.run(
-        command,
-        check=False,
-    )
     (k8s_2_configurable / "placeholder.charm").touch()
     # Deploy the app.
     command = [
@@ -60,52 +47,68 @@ def test_pebble_ready_crash_sets_error_status(k8s_2_configurable):
         cwd=k8s_2_configurable,
         check=True,
     )
-    # Wait for the container to be running.
-    deadline = time.monotonic() + 30.0
-    while time.monotonic() < deadline:
-        try:
-            helpers.assert_container(CONTAINER_NAME)
-        except subprocess.CalledProcessError:
-            time.sleep(0.5)
-            continue
-        break
-    else:
-        raise AssertionError("container did not start")
-    # wait-for should fail fast with the error message, not time out.
-    command = [
-        *JUJU,
-        "wait-for",
-        "application",
-        "fastapi-demo",
-        "--timeout",
-        "30s",
-    ]
-    result = subprocess.run(
-        command,
-        cwd=k8s_2_configurable,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert result.returncode != 0
-    assert 'hook failed: "demo-server-pebble-ready"' in result.stderr
-    # TEARDOWN
-    command = [
-        *JUJU,
-        "remove-application",
-        "fastapi-demo",
-    ]
-    subprocess.run(
-        command,
-        cwd=k8s_2_configurable,
-        check=True,
-    )
-    deadline = time.monotonic() + 30.0
-    while time.monotonic() < deadline:
-        try:
-            helpers.assert_no_container(CONTAINER_NAME)
+    try:
+        # Wait for the container to be running.
+        deadline = time.monotonic() + 30.0
+        while time.monotonic() < deadline:
+            try:
+                helpers.assert_container(CONTAINER_NAME)
+            except subprocess.CalledProcessError:
+                time.sleep(0.5)
+                continue
             break
-        except AssertionError:
-            time.sleep(0.5)
-    else:
-        raise AssertionError("container was not removed")
+        else:
+            raise AssertionError("container did not start")
+        # wait-for should fail fast with the error message, not time out.
+        command = [
+            *JUJU,
+            "wait-for",
+            "application",
+            "fastapi-demo",
+            "--timeout",
+            "30s",
+        ]
+        result = subprocess.run(
+            command,
+            cwd=k8s_2_configurable,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode != 0
+        assert 'hook failed: "demo-server-pebble-ready"' in result.stderr
+        # TEARDOWN
+        command = [
+            *JUJU,
+            "remove-application",
+            "fastapi-demo",
+        ]
+        subprocess.run(
+            command,
+            cwd=k8s_2_configurable,
+            check=True,
+        )
+        deadline = time.monotonic() + 30.0
+        while time.monotonic() < deadline:
+            try:
+                helpers.assert_no_container(CONTAINER_NAME)
+                break
+            except AssertionError:
+                time.sleep(0.5)
+        else:
+            raise AssertionError("container was not removed")
+    finally:
+        # Safety net: remove the app in case an assertion failed
+        # before TEARDOWN completed.
+        command = [
+            *JUJU,
+            "remove-application",
+            "fastapi-demo",
+        ]
+        subprocess.run(
+            command,
+            cwd=k8s_2_configurable,
+            capture_output=True,
+            text=True,
+            check=False,
+        )

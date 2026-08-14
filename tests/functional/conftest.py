@@ -41,6 +41,41 @@ def system_ready():
     yield
 
 
+@pytest.fixture(scope="session", autouse=True)
+def cleanup_leaked_containers():
+    # Safety net: remove any jjx-managed containers left behind by a test
+    # that failed before reaching its TEARDOWN section.
+    yield
+    runtime = jjx.container_runtime()
+    command = [
+        runtime,
+        "ps",
+        "--all",
+        "--format",
+        "{{.Names}}",
+    ]
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    for name in result.stdout.splitlines():
+        name = name.strip()
+        if name.startswith(("jubilant-", "jjx-default-", "jjx-layer-copy-")):
+            command = [
+                runtime,
+                "rm",
+                "--force",
+                name,
+            ]
+            subprocess.run(
+                command,
+                capture_output=True,
+                check=False,
+            )
+
+
 @pytest.fixture(scope="module")
 def temp_dir():
     tmp_dir = PACKAGE_DIR / ".tmp"
