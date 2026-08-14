@@ -48,14 +48,19 @@ charms:
 
 [private]
 pre-release:
-  @echo 'Do these steps before each release. If any step fails, stop and investigate the failure - don'\''t continue the process.'
+  @echo "Do these steps before each release. If any step fails, stop and investigate the failure - don't continue the process."
   @echo ''
-  @echo '1. `just deps`'
-  @echo '2. `just format`'
-  @echo '3. `just lint`'
-  @echo '4. `just test`'
-  @echo '5. `just pebble`, then `just functional` if `PEBBLE_VERSION` changed'
-  @echo '6. `just charms`, then `just functional` if any files changed'
+  @echo '1. `just deps`. If any files changed:'
+  @echo '  a. `just format`'
+  @echo '  b. `just lint`'
+  @echo '  c. `just test`'
+  @echo "  d. Commit 'bump deps'"
+  @echo '2. `just pebble`. If `PEBBLE_VERSION` changed:'
+  @echo '  a. `just functional`'
+  @echo "  b. Commit 'bump Pebble'"
+  @echo '3. `just charms`. If any files changed:'
+  @echo '  a. `just functional`'
+  @echo "  b. Commit 'refresh charms'"
 
 [private]
 clean-docker:
