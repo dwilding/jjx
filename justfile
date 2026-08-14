@@ -48,19 +48,21 @@ charms:
 
 [private]
 pre-release:
-  @echo "Do these steps before each release. If any step fails, stop and investigate the failure - don't continue the process."
+  @echo 'Do these steps before each release. If any step fails, stop and investigate the failure - don'\''t continue the process.'
   @echo ''
-  @echo '1. `just deps`. If any files changed:'
+  @echo '1. `just deps`. If `uv.lock` changed:'
   @echo '  a. `just format`'
   @echo '  b. `just lint`'
   @echo '  c. `just test`'
-  @echo "  d. Commit 'bump deps'"
+  @echo '  d. `git commit -am "bump deps"`'
+  @echo '1. (continued) If only workflow YAML files changed:'
+  @echo '  a. `git commit -am "bump deps"`'
   @echo '2. `just pebble`. If `PEBBLE_VERSION` changed:'
   @echo '  a. `just functional`'
-  @echo "  b. Commit 'bump Pebble'"
+  @echo '  b. `git commit -am "bump Pebble"`'
   @echo '3. `just charms`. If any files changed:'
   @echo '  a. `just functional`'
-  @echo "  b. Commit 'refresh charms'"
+  @echo '  b. `git commit -am "refresh charms"`'
 
 [private]
 clean-docker:
