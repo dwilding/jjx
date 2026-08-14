@@ -26,6 +26,14 @@ deps:
   uv run --script .scripts/bump_deps.py
 
 [private]
+pebble:
+  #!/bin/bash
+  set -euo pipefail
+  latest=$(curl -fsSL https://api.github.com/repos/canonical/pebble/releases/latest | jq -r .tag_name)
+  sed -i "s/^PEBBLE_VERSION = .*/PEBBLE_VERSION = \"$latest\"/" src/jjx/_version.py
+  echo "Set PEBBLE_VERSION to $latest"
+
+[private]
 charms:
   #!/bin/bash
   set -euo pipefail
