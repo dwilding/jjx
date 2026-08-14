@@ -53,17 +53,6 @@ def server_up(ip: str, port: int) -> bool:
 
 
 def test_container_processes(k8s_2_configurable):
-    # Clean up any deployed apps from previous tests.
-    command = [
-        jjx.container_runtime(),
-        "rm",
-        "--force",
-        CONTAINER_NAME,
-    ]
-    subprocess.run(
-        command,
-        check=False,  # Ignore a missing container (good enough for now).
-    )
     (k8s_2_configurable / "placeholder.charm").touch()
     # Deploy the app.
     command = [
@@ -90,9 +79,9 @@ def test_container_processes(k8s_2_configurable):
         break
     else:
         raise AssertionError("container did not start")
-    # Check that there are no server processes (pebble-ready fires after a delay).
+    # Check that there are no server processes yet. pebble-ready fires after a delay.
     assert_process_count(0)
-    # Wait for the charm to be active (happens after pebble-ready fires).
+    # Wait for the charm to be active. This happens after pebble-ready fires.
     command = [
         *JUJU,
         "wait-for",
@@ -129,7 +118,7 @@ def test_pebble_was_unreachable(k8s_2_configurable):
         f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
     # Check that Pebble was unreachable when handling config-changed, as with real Juju.
-    # The log message comes from _replan_workload() - called on config-changed and pebble-ready.
+    # The log message comes from _replan_workload(), which is called on config-changed and pebble-ready.
     assert "Unable to connect to Pebble" in result.stdout
 
 

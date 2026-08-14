@@ -47,11 +47,29 @@ def test_pass_without_plugin(k8s_2_configurable):
         "pytest",
         "tests/integration",
     ]
-    subprocess.run(
-        command,
-        cwd=k8s_2_configurable,
-        check=True,
-    )
-    assert not (k8s_2_configurable / ".jjx").exists()
-    assert (k8s_2_configurable / "placeholder.charm").exists()
-    (k8s_2_configurable / "placeholder.charm").unlink()
+    try:
+        subprocess.run(
+            command,
+            cwd=k8s_2_configurable,
+            check=True,
+        )
+        assert not (k8s_2_configurable / ".jjx").exists()
+        assert (k8s_2_configurable / "placeholder.charm").exists()
+        # TEARDOWN
+        (k8s_2_configurable / "placeholder.charm").unlink()
+    finally:
+        # Safety net: tear down jjx even if the inner pytest failed.
+        command = [
+            "uvx",
+            "--with-editable",
+            PACKAGE_DIR,
+            "jjx",
+            "down",
+        ]
+        subprocess.run(
+            command,
+            cwd=k8s_2_configurable,
+            capture_output=True,
+            text=True,
+            check=False,
+        )

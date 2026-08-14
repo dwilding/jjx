@@ -174,38 +174,55 @@ def test_jjx_detach_then_down(k8s_2_configurable):
         text=True,
         check=False,
     )
-    assert result.returncode == 0, (
-        f"jjx exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-    )
-    assert "Workload running at " in result.stdout
-    model_name = result.stdout.split("--juju-model ")[1].split()[0]
-    container_name = f"{model_name}-test-charm-demo-server"
-    operator_container_name = f"{model_name}-test-charm-operator"
-    helpers.assert_container(container_name)
-    helpers.assert_container(operator_container_name)
-    assert not (k8s_2_configurable / "placeholder.charm").exists()
-    # TEARDOWN
-    command = [
-        "uv",
-        "run",
-        "jjx",
-        "down",
-    ]
-    result = subprocess.run(
-        command,
-        cwd=k8s_2_configurable,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert result.returncode == 0, (
-        f"jjx down exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-    )
-    assert f"Removed {container_name}" in result.stdout
-    assert f"Removed {operator_container_name}" in result.stdout
-    helpers.assert_no_container(container_name)
-    helpers.assert_no_container(operator_container_name)
-    assert not (k8s_2_configurable / ".jjx").exists()
+    try:
+        assert result.returncode == 0, (
+            f"jjx exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+        assert "Workload running at " in result.stdout
+        model_name = result.stdout.split("--juju-model ")[1].split()[0]
+        container_name = f"{model_name}-test-charm-demo-server"
+        operator_container_name = f"{model_name}-test-charm-operator"
+        helpers.assert_container(container_name)
+        helpers.assert_container(operator_container_name)
+        assert not (k8s_2_configurable / "placeholder.charm").exists()
+        # TEARDOWN
+        command = [
+            "uv",
+            "run",
+            "jjx",
+            "down",
+        ]
+        result = subprocess.run(
+            command,
+            cwd=k8s_2_configurable,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, (
+            f"jjx down exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+        assert f"Removed {container_name}" in result.stdout
+        assert f"Removed {operator_container_name}" in result.stdout
+        helpers.assert_no_container(container_name)
+        helpers.assert_no_container(operator_container_name)
+        assert not (k8s_2_configurable / ".jjx").exists()
+    finally:
+        # Safety net for jjx -d: run jjx down in case an assertion
+        # failed before TEARDOWN completed.
+        command = [
+            "uv",
+            "run",
+            "jjx",
+            "down",
+        ]
+        subprocess.run(
+            command,
+            cwd=k8s_2_configurable,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
 
 
 def test_jjx_detach_then_rerun(k8s_2_configurable):
@@ -227,28 +244,45 @@ def test_jjx_detach_then_rerun(k8s_2_configurable):
         text=True,
         check=False,
     )
-    assert result.returncode == 1
-    assert "Workload running at " not in result.stdout
-    assert " is up" in result.stderr
-    assert (k8s_2_configurable / ".jjx").exists()
-    # TEARDOWN
-    command = [
-        "uv",
-        "run",
-        "jjx",
-        "down",
-    ]
-    result = subprocess.run(
-        command,
-        cwd=k8s_2_configurable,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert result.returncode == 0, (
-        f"jjx down exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-    )
-    assert result.stdout.count("Removed ") == 2
+    try:
+        assert result.returncode == 1
+        assert "Workload running at " not in result.stdout
+        assert " is up" in result.stderr
+        assert (k8s_2_configurable / ".jjx").exists()
+        # TEARDOWN
+        command = [
+            "uv",
+            "run",
+            "jjx",
+            "down",
+        ]
+        result = subprocess.run(
+            command,
+            cwd=k8s_2_configurable,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, (
+            f"jjx down exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+        assert result.stdout.count("Removed ") == 2
+    finally:
+        # Safety net for jjx -d: run jjx down in case an assertion
+        # failed before TEARDOWN completed.
+        command = [
+            "uv",
+            "run",
+            "jjx",
+            "down",
+        ]
+        subprocess.run(
+            command,
+            cwd=k8s_2_configurable,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
 
 
 def test_jjx_pytest_fail(k8s_2_configurable):
@@ -271,28 +305,45 @@ def test_jjx_pytest_fail(k8s_2_configurable):
         text=True,
         check=False,
     )
-    assert result.returncode == 1
-    # The container should still be running because `test_deploy` should have passed.
-    assert "Workload running at " in result.stdout
-    assert (k8s_2_configurable / ".jjx").exists()
-    # TEARDOWN
-    command = [
-        "uv",
-        "run",
-        "jjx",
-        "down",
-    ]
-    result = subprocess.run(
-        command,
-        cwd=k8s_2_configurable,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert result.returncode == 0, (
-        f"jjx down exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-    )
-    assert "Removed " in result.stdout
+    try:
+        assert result.returncode == 1
+        # The container should still be running because `test_deploy` should have passed.
+        assert "Workload running at " in result.stdout
+        assert (k8s_2_configurable / ".jjx").exists()
+        # TEARDOWN
+        command = [
+            "uv",
+            "run",
+            "jjx",
+            "down",
+        ]
+        result = subprocess.run(
+            command,
+            cwd=k8s_2_configurable,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, (
+            f"jjx down exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+        assert "Removed " in result.stdout
+    finally:
+        # Safety net for jjx -d: run jjx down in case an assertion
+        # failed before TEARDOWN completed.
+        command = [
+            "uv",
+            "run",
+            "jjx",
+            "down",
+        ]
+        subprocess.run(
+            command,
+            cwd=k8s_2_configurable,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
 
 
 def test_jjx_pytest_select(k8s_2_configurable):
@@ -314,29 +365,46 @@ def test_jjx_pytest_select(k8s_2_configurable):
         text=True,
         check=False,
     )
-    assert result.returncode == 0, (
-        f"jjx exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-    )
-    assert "Workload running at " in result.stdout
-    assert (k8s_2_configurable / ".jjx").exists()
-    # TEARDOWN
-    command = [
-        "uv",
-        "run",
-        "jjx",
-        "down",
-    ]
-    result = subprocess.run(
-        command,
-        cwd=k8s_2_configurable,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert result.returncode == 0, (
-        f"jjx down exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-    )
-    assert "Removed " in result.stdout
+    try:
+        assert result.returncode == 0, (
+            f"jjx exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+        assert "Workload running at " in result.stdout
+        assert (k8s_2_configurable / ".jjx").exists()
+        # TEARDOWN
+        command = [
+            "uv",
+            "run",
+            "jjx",
+            "down",
+        ]
+        result = subprocess.run(
+            command,
+            cwd=k8s_2_configurable,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, (
+            f"jjx down exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+        assert "Removed " in result.stdout
+    finally:
+        # Safety net for jjx -d: run jjx down in case an assertion
+        # failed before TEARDOWN completed.
+        command = [
+            "uv",
+            "run",
+            "jjx",
+            "down",
+        ]
+        subprocess.run(
+            command,
+            cwd=k8s_2_configurable,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
 
 
 def test_jjx_pytest_select_verbose(k8s_2_configurable):
@@ -355,23 +423,40 @@ def test_jjx_pytest_select_verbose(k8s_2_configurable):
         text=True,
         check=False,
     )
-    assert result.returncode == 0, (
-        f"jjx exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-    )
-    # -vv makes pytest print each test node id with a PASSED/FAILED marker.
-    assert "test_charm.py::test_deploy" in result.stdout
-    # TEARDOWN
-    command = [
-        "uv",
-        "run",
-        "jjx",
-        "down",
-    ]
-    subprocess.run(
-        command,
-        cwd=k8s_2_configurable,
-        check=True,
-    )
+    try:
+        assert result.returncode == 0, (
+            f"jjx exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+        # -vv makes pytest print each test node id with a PASSED/FAILED marker.
+        assert "test_charm.py::test_deploy" in result.stdout
+        # TEARDOWN
+        command = [
+            "uv",
+            "run",
+            "jjx",
+            "down",
+        ]
+        subprocess.run(
+            command,
+            cwd=k8s_2_configurable,
+            check=True,
+        )
+    finally:
+        # Safety net for jjx -d: run jjx down in case an assertion
+        # failed before TEARDOWN completed.
+        command = [
+            "uv",
+            "run",
+            "jjx",
+            "down",
+        ]
+        subprocess.run(
+            command,
+            cwd=k8s_2_configurable,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
 
 
 def test_jjx_no_deploy(k8s_2_configurable):

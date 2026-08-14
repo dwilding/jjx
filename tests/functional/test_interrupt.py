@@ -106,7 +106,7 @@ def test_ctrl_c_tears_down(k8s_2_configurable):
         proc.communicate()
         raise AssertionError("jjx did not exit within 60s of SIGINT")
     assert proc.returncode == 130
-    # Check that no containers leaked.
+    # Check that no jjx-managed containers leaked.
     command = [
         runtime,
         "ps",
@@ -120,6 +120,10 @@ def test_ctrl_c_tears_down(k8s_2_configurable):
         text=True,
         check=False,
     )
-    leftover = [n for n in result.stdout.splitlines() if n.strip()]
+    leftover = [
+        n
+        for n in result.stdout.splitlines()
+        if n.strip().startswith(("jubilant-", "jjx-default-", "jjx-layer-copy-"))
+    ]
     assert not leftover
     assert not (k8s_2_configurable / ".jjx").exists()
