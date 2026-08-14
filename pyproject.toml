@@ -21,13 +21,13 @@ juju = "jjx._cli:juju_cli"
 dev = [
     "ruff==0.16.1",
     "pytest==9.1.1",
-    "ty==0.0.65",
+    "ty==0.0.69",
     "zizmor==1.29.0",
 ]
 
 [build-system]
 requires = [
-    "uv_build==0.12.1",
+    "uv_build==0.12.2",
 ]
 build-backend = "uv_build"
 
