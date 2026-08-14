@@ -46,6 +46,7 @@ charms:
   cd tests/functional/charms/k8s-2-configurable
   UV_NO_CONFIG=1 tox -e format,lint,unit
 
+[private]
 pre-release:
   @echo 'Do these steps before each release. If any step fails, stop and investigate the failure - don'\''t continue the process.'
   @echo ''
