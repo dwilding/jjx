@@ -7,6 +7,92 @@ import helpers_functional as helpers
 PACKAGE_DIR = pathlib.Path(__file__).parent.parent.parent
 
 
+def test_charmcraft_profile(temp_dir):
+    # Generate a charm from Charmcraft.
+    charm_dir = temp_dir / "myapp"
+    charm_dir.mkdir()
+    command = [
+        "uvx",
+        "--with",
+        "git+https://github.com/canonical/charmcraft@main",
+        "charmcraft",
+        "init",
+        "--profile",
+        "kubernetes",
+        "--author",
+        "Charmer",
+    ]
+    subprocess.run(
+        command,
+        cwd=charm_dir,
+        check=True,
+    )
+    # Run the charm's integration tests with jjx.
+    command = [
+        "uvx",
+        "--with-editable",
+        PACKAGE_DIR,
+        "jjx",
+        "-d",
+    ]
+    result = subprocess.run(
+        command,
+        cwd=charm_dir,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    try:
+        assert result.returncode == 0, (
+            f"jjx exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+        model_name = result.stdout.split("--juju-model ")[1].split()[0]
+        container_names = [
+            f"{model_name}-test-charm-operator",
+            f"{model_name}-test-charm-some-container",
+        ]
+        for container_name in container_names:
+            helpers.assert_container(container_name)
+        # TEARDOWN
+        command = [
+            "uvx",
+            "--with-editable",
+            PACKAGE_DIR,
+            "jjx",
+            "down",
+        ]
+        result = subprocess.run(
+            command,
+            cwd=charm_dir,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, (
+            f"jjx down exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+        for container_name in container_names:
+            assert f"Removed {container_name}" in result.stdout
+            helpers.assert_no_container(container_name)
+    finally:
+        # Safety net: ensure containers are removed even if an assertion
+        # above failed before TEARDOWN completed.
+        command = [
+            "uvx",
+            "--with-editable",
+            PACKAGE_DIR,
+            "jjx",
+            "down",
+        ]
+        subprocess.run(
+            command,
+            cwd=charm_dir,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+
 def test_httpbin_demo(temp_dir):
     command = [
         "git",

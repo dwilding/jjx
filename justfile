@@ -17,6 +17,8 @@ unit: (test "tests/unit")
 
 functional: (test "tests/functional")
 
+golden: (test "tests/functional/test_golden_charms.py")
+
 [private]
 test args="tests/unit tests/functional":
   uv run pytest -vv {{args}}
