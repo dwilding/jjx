@@ -14,7 +14,7 @@ def test_charmcraft_profile(temp_dir):
     command = [
         "uvx",
         "--with",
-        "git+https://github.com/dwilding/charmcraft@k8s-profile-image",
+        "git+https://github.com/canonical/charmcraft@main",
         "charmcraft",
         "init",
         "--profile",
