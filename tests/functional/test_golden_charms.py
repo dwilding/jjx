@@ -19,6 +19,8 @@ def test_charmcraft_profile(temp_dir):
         "init",
         "--profile",
         "kubernetes",
+        "--author",
+        "Charmer",
     ]
     subprocess.run(
         command,
