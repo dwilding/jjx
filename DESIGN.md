@@ -68,6 +68,7 @@ Supported:
 - cross-model relations via `juju offer` and `juju integrate <model>.<app>`
 - virtual bundles (e.g. `juju deploy cos-lite`)
 - `juju run` (actions) on virtual charms
+- app-managed and user secrets, including `secret-changed` event dispatch
 
 Not supported:
 
@@ -257,6 +258,12 @@ jjx implements several juju commands that jubilant/pytest-jubilant may call duri
 - `juju version` — returns a minimal version response
 - `juju show-model` — returns model metadata
 - `juju models` — lists all models in state
+- `juju add-secret` — creates a user secret owned by the model; prints the secret URI
+- `juju grant-secret` — grants an application read access to a user secret
+- `juju update-secret` — creates a new revision of a secret's content and dispatches `secret-changed` to every observing application
+- `juju secrets` — lists secrets in the model (JSON format matching jubilant's `Secret` type)
+- `juju show-secret` — returns secret metadata, optionally with revealed content
+- `juju remove-secret` — removes a secret (or a single revision)
 
 ## hook tools
 
@@ -268,9 +275,33 @@ Implemented:
 - `is-leader` — always returns `true` (single-unit model)
 - `juju-log` — appends to the model's log in `state.json`
 - `relation-ids`, `relation-list`, `relation-get`, `relation-set`, `relation-model-get` — relation data access
-- `secret-add`, `secret-get`, `secret-grant`, `secret-info-get`, `secret-ids`, `secret-remove`, `secret-revoke`, `secret-set` — secret management
+- `secret-add`, `secret-get`, `secret-grant`, `secret-info-get`, `secret-ids`, `secret-remove`, `secret-revoke`, `secret-set` — secret management (see "secrets" below)
 - `network-get` — returns the workload container's IP address (from `state.json`, not Docker, since Docker isn't available inside the charm runner). All bindings resolve to the workload's IP.
 - `application-version-set` — sets the workload version in state
+
+## secrets
+
+jjx supports both app-managed secrets (created by the charm via `secret-add`) and user secrets (created via `juju add-secret` and granted to the charm via `juju grant-secret`).
+
+Secrets are stored in `state.json` under `model_state["secrets"]`. Each secret tracks:
+
+- `id` — the canonical URI (`secret://<model-uuid>/<id>`)
+- `label` — the owner-assigned label (app secrets) or `null` (user secrets)
+- `name` — the user-facing name (user secrets) or `null` (app secrets)
+- `owner` — the owning application name, or `"model"` for user secrets
+- `content` — the latest revision's content (a denormalized copy of `revisions[-1]`)
+- `revisions` — a list of content dicts; index 0 is revision 1
+- `revision` — the latest revision number
+- `grants` — which applications have read access
+- `rotate`, `expire`, `description` — optional metadata
+- `created`, `updated` — ISO timestamps (for jubilant's `Secret.created`/`Secret.updated`)
+- `observers` — per-app tracking: `{app: {label, tracked_revision}}`
+
+When a charm calls `secret-get` with both an `id` and a `label`, jjx records the observer label so subsequent `secret-changed` events can supply it via `JUJU_SECRET_LABEL`. `secret-get` with `--refresh` or `--peek` returns the latest revision's content; `--refresh` also updates the observer's tracked revision. Without either flag, the tracked revision's content is returned (or the latest, if the observer hasn't tracked a revision yet).
+
+`juju update-secret` creates a new revision and dispatches a `secret-changed` event to every granted application that is observing the secret. The event carries `JUJU_SECRET_ID` and the observer's `JUJU_SECRET_LABEL`; the charm re-reads the content with `get_content(refresh=True)`. The `secret-set` hook tool creates a new revision but does not dispatch `secret-changed` — it is called by the secret owner mid-hook (e.g. during `secret-rotate`), and jjx is single-app so there are no other observers to notify.
+
+`secret-info-get` returns a single-entry dict keyed by the secret URI (`{uri: {revision, label, ...}}`), matching the format `ops` parses.
 
 ## constraints
 
