@@ -1092,6 +1092,10 @@ def _ensure_hook_tools(python_exe: str) -> None:
         "secret-revoke",
         "secret-set",
         "network-get",
+        "action-get",
+        "action-set",
+        "action-fail",
+        "action-log",
     ]
     root = _hook_tools_dir()
     root.mkdir(parents=True, exist_ok=True)
@@ -1186,6 +1190,8 @@ def _build_charm_env(
     relation: dict[str, Any] | None = None,
     secret: dict[str, Any] | None = None,
     secret_revision: int | None = None,
+    action_name: str | None = None,
+    action_uuid: str | None = None,
 ) -> dict[str, str]:
     unit_name = app_state.get("unit", f"{app_name}/0")
 
@@ -1242,6 +1248,13 @@ def _build_charm_env(
         for var in ("JUJU_SECRET_ID", "JUJU_SECRET_LABEL", "JUJU_SECRET_REVISION"):
             env.pop(var, None)
 
+    if action_name is not None and action_uuid is not None:
+        env["JUJU_ACTION_NAME"] = action_name
+        env["JUJU_ACTION_UUID"] = action_uuid
+    else:
+        for var in ("JUJU_ACTION_NAME", "JUJU_ACTION_UUID"):
+            env.pop(var, None)
+
     # Hook tools are at /jjx/hook-tools inside the charm runner container.
     env["PATH"] = "/jjx/hook-tools:/usr/bin:/bin"
     # Hook tools do `import jjx`, so they need the same PYTHONPATH as the
@@ -1262,6 +1275,8 @@ def _run_charm_event(
     relation: dict[str, Any] | None = None,
     secret: dict[str, Any] | None = None,
     secret_revision: int | None = None,
+    action_name: str | None = None,
+    action_uuid: str | None = None,
 ) -> None:
     state = _load_state()
     model_state = state["models"][model_name]
@@ -1295,6 +1310,8 @@ def _run_charm_event(
         relation=relation,
         secret=secret,
         secret_revision=secret_revision,
+        action_name=action_name,
+        action_uuid=action_uuid,
     )
 
     container_name = app_state.get("container_name", "")
@@ -1405,6 +1422,82 @@ def _run_deploy_event_flow(model_name: str, app_name: str, workload_name: str) -
     """Run config-changed then pebble-ready synchronously (for tests)."""
     _run_config_changed_event(model_name, app_name)
     _run_pebble_ready_event(model_name, app_name, workload_name)
+
+
+def _run_action_event(
+    model_name: str,
+    app_name: str,
+    action_name: str,
+    params: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Run an action hook on the real charm and return the task result dict.
+
+    This mirrors real Juju's action dispatch: the charm's ``actions/<name>``
+    hook is executed via ``docker exec`` into the charm runner, with
+    ``JUJU_ACTION_NAME`` and ``JUJU_ACTION_UUID`` set (and ``JUJU_HOOK_NAME``
+    empty, per ops). The action hook tools (``action-get``, ``action-set``,
+    ``action-fail``, ``action-log``) write to a per-action results file in
+    ``.jjx/``; this function reads that file after the hook exits to build
+    the result jubilant expects.
+
+    Returns a dict with keys: ``id``, ``status``, ``results``, ``return-code``,
+    ``stderr``, ``message``, ``log``.
+    """
+    action_uuid = uuid.uuid4().hex[:8]
+    results_path = _jjx_dir() / f"action-{action_uuid}.json"
+    results_path.write_text(
+        json.dumps(
+            {"params": params or {}, "results": {}, "log": [], "message": "", "failed": False}
+        ),
+        encoding="utf-8",
+    )
+
+    try:
+        _run_charm_event(
+            model_name,
+            app_name,
+            hook_name="",
+            dispatch_path=f"actions/{action_name}",
+            action_name=action_name,
+            action_uuid=action_uuid,
+        )
+        # _run_charm_event raises CliError on non-zero exit, so reaching here
+        # means the hook succeeded.
+        return_code = 0
+        stderr = ""
+    except CliError as exc:
+        # The hook exited non-zero. Real Juju marks the task as "failed".
+        # The error status has already been written to state by
+        # _run_charm_event; the exception message goes to the task's stderr.
+        return_code = 1
+        stderr = exc.message
+    finally:
+        if results_path.exists():
+            data = json.loads(results_path.read_text(encoding="utf-8"))
+            results_path.unlink(missing_ok=True)
+        else:
+            data = {}
+
+    results = data.get("results", {})
+    failed = data.get("failed", False)
+    message = data.get("message", "")
+    log = data.get("log", [])
+
+    status = "completed" if return_code == 0 and not failed else "failed"
+
+    # jubilant's Task._from_dict pops these special keys out of results.
+    task_results = dict(results)
+    task_results["return-code"] = return_code
+    task_results["stdout"] = ""
+    task_results["stderr"] = stderr
+
+    return {
+        "id": action_uuid,
+        "status": status,
+        "results": task_results,
+        "message": message,
+        "log": log,
+    }
 
 
 # Minimum delay (seconds) between deploy() returning and pebble-ready firing.

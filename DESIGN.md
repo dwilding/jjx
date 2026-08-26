@@ -67,7 +67,7 @@ Supported:
 - multiple models (e.g. a charm model and a COS model)
 - cross-model relations via `juju offer` and `juju integrate <model>.<app>`
 - virtual bundles (e.g. `juju deploy cos-lite`)
-- `juju run` (actions) on virtual charms
+- `juju run` (actions) on real and virtual charms
 - app-managed and user secrets, including `secret-changed` event dispatch
 
 Not supported:
@@ -116,6 +116,7 @@ The `.charm` file passed to deploy is a trigger only. `jjx` does not inspect or 
 - `./.jjx/charm/` (staged runtime charm directory with `src/`, `lib/`, `metadata.yaml`, `config.yaml`, and `.unit-state.db`)
 - `./.jjx/socket` (Pebble API Unix socket, bind-mounted into both the workload and charm runner containers)
 - `./.jjx/<app>.<pid>.deploy` (marker files for in-flight background pebble-ready processes; created by deploy, deleted by the process on completion or by teardown)
+- `./.jjx/action-<uuid>.json` (transient per-action results file; created by `juju run`, read/written by the action hook tools, deleted after the hook exits)
 - `./.jjx/prom-config-<app>/` (Prometheus config directory, bind-mounted into the Prometheus container)
 - `./.jjx/grafana-config-<app>/` (Grafana provisioning directory, bind-mounted into the Grafana container)
 
@@ -253,7 +254,7 @@ When `jjx down` tears down all models, models are destroyed in reverse creation 
 jjx implements several juju commands that jubilant/pytest-jubilant may call during setup, teardown, or status checks. These are minimal stubs that return just enough data for jubilant to function:
 
 - `juju offer` — records a cross-model offer in model state
-- `juju run` — executes actions on virtual charms (e.g. traefik's `show-proxied-endpoints`)
+- `juju run` — executes actions on real charms (dispatching the `actions/<name>` hook via `docker exec`) and on virtual charms (returning dynamically-computed results)
 - `juju switch` — no-op (jjx always uses `--model`)
 - `juju version` — returns a minimal version response
 - `juju show-model` — returns model metadata
@@ -278,6 +279,13 @@ Implemented:
 - `secret-add`, `secret-get`, `secret-grant`, `secret-info-get`, `secret-ids`, `secret-remove`, `secret-revoke`, `secret-set` — secret management (see "secrets" below)
 - `network-get` — returns the workload container's IP address (from `state.json`, not Docker, since Docker isn't available inside the charm runner). All bindings resolve to the workload's IP.
 - `application-version-set` — sets the workload version in state
+- `action-get`, `action-set`, `action-fail`, `action-log` — action parameter access and result collection (see "actions" below)
+
+## actions
+
+`juju run <unit> <action>` dispatches the charm's `actions/<name>` hook via `docker exec` into the charm runner, with `JUJU_ACTION_NAME` and `JUJU_ACTION_UUID` set and `JUJU_HOOK_NAME` empty (per `ops`). The action hook tools communicate with `juju run` through a transient per-action results file (`./.jjx/action-<uuid>.json`): `action-get` reads the params, `action-set` accumulates results, `action-fail` sets the failure message, and `action-log` appends progress messages. After the hook exits, `juju run` reads the file and emits the task JSON jubilant expects.
+
+A hook that exits non-zero (uncaught exception) marks the task `failed` and sets unit/app status to `error`, matching real Juju. A hook that calls `action-fail` marks the task `failed` without changing unit status. In both cases `juju run` exits non-zero with `task failed` on stderr (and the task JSON on stdout) so jubilant raises `TaskError`.
 
 ## secrets
 

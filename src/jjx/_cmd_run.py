@@ -1,8 +1,8 @@
 """Run command wrapper (actions).
 
-Executes an action on a unit. For real charms, this would run the action
-hook via ``docker exec`` into the charm runner (not yet implemented). For
-virtual charms, it returns dynamically-computed results (e.g. traefik's
+Executes an action on a unit. For real charms, this runs the action hook via
+``docker exec`` into the charm runner (see :func:`jjx._engine._run_action_event`).
+For virtual charms, it returns dynamically-computed results (e.g. traefik's
 ``show-proxied-endpoints`` discovers the URLs of other COS charms in the model).
 """
 
@@ -11,6 +11,8 @@ from __future__ import annotations
 import json
 import sys
 from typing import Any
+
+import yaml
 
 from . import _engine, _virtual_traefik
 
@@ -24,6 +26,7 @@ def run(args: list[str], model: str | None) -> int:
     output_format = "json"
     unit: str | None = None
     action: str | None = None
+    params_file: str | None = None
 
     i = 0
     while i < len(args):
@@ -43,7 +46,12 @@ def run(args: list[str], model: str | None) -> int:
             i += 1
             continue
         if token == "--params" and i + 1 < len(args):
+            params_file = args[i + 1]
             i += 2
+            continue
+        if token.startswith("--params="):
+            params_file = token.split("=", 1)[1]
+            i += 1
             continue
         if token.startswith("--"):
             i += 1
@@ -76,11 +84,31 @@ def run(args: list[str], model: str | None) -> int:
     if app_state.get("virtual"):
         return _run_virtual_action(model_state, app_name, app_state, action, output_format)
 
-    # For real charms, we would need to run the action hook. This is not
-    # implemented yet — the k8s-5-observe tests only use actions on traefik
-    # (virtual) and the charm's own get-db-info action (which the tests
-    # don't call in the COS Lite test flow).
-    raise _engine.CliError(f"actions on real charms not yet supported: {action}")
+    # Real charm: dispatch the action hook and return the task result.
+    params: dict[str, Any] = {}
+    if params_file:
+        try:
+            loaded = yaml.safe_load(open(params_file).read())  # noqa: SIM115
+        except OSError as exc:
+            raise _engine.CliError(f"failed to read params file: {exc}") from None
+        if loaded is not None:
+            if not isinstance(loaded, dict):
+                raise _engine.CliError(
+                    f"action params must be a mapping, got {type(loaded).__name__}"
+                )
+            params = loaded
+
+    task = _engine._run_action_event(model_name, app_name, action, params=params)
+    unit_name = app_state.get("unit", f"{app_name}/0")
+    result = {unit_name: task}
+    sys.stdout.write(json.dumps(result))
+    # jubilant expects the CLI to exit non-zero with "task failed" in stderr
+    # when the action fails, so it can distinguish a failed action from a
+    # command error. The task JSON is still on stdout either way.
+    if task["status"] != "completed":
+        sys.stderr.write(f"task failed: action {action!r} on {unit_name}\n")
+        return 1
+    return 0
 
 
 def _run_virtual_action(

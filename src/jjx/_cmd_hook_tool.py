@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import pathlib
 import sys
 from typing import Any
 
@@ -237,6 +238,9 @@ def hook_tool(args: list[str]) -> int:
 
     if tool == "network-get":
         return _network_get(tool_args, app_state)
+
+    if tool in ("action-get", "action-set", "action-fail", "action-log"):
+        return _action_tool(tool, tool_args)
 
     raise _engine.CliError(f"unsupported hook tool: {tool}")
 
@@ -1084,3 +1088,177 @@ def _network_get(tool_args: list[str], app_state: dict[str, Any]) -> int:
     else:
         sys.stdout.write(yaml.safe_dump(network_info, default_flow_style=False))
     return 0
+
+
+# ---------------------------------------------------------------------------
+# Action hook tools
+# ---------------------------------------------------------------------------
+
+
+def _action_results_path() -> pathlib.Path:
+    """Return the path to the current action's results file.
+
+    The file is keyed by ``JUJU_ACTION_UUID`` (set by the action dispatch in
+    ``_engine._run_action_event``). It holds the params (input) and the
+    accumulating results, log messages, failure message, and failed flag that
+    the action hook tools write during the hook. ``_run_action_event`` reads
+    it after the hook exits to construct the task result jubilant expects.
+    """
+    action_uuid = os.environ.get("JUJU_ACTION_UUID")
+    if not action_uuid:
+        raise _engine.CliError("action hook tool called outside an action hook")
+    return _engine._jjx_dir() / f"action-{action_uuid}.json"
+
+
+def _load_action_results() -> dict[str, Any]:
+    path = _action_results_path()
+    if not path.exists():
+        raise _engine.CliError(f"action results file not found: {path.name}")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _save_action_results(data: dict[str, Any]) -> None:
+    path = _action_results_path()
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _action_get(tool_args: list[str]) -> int:
+    """action-get [--format=json] [key]
+
+    Returns the action parameters. With a dotted key, recurses into the
+    params map (matching real Juju's ``action-get``).
+    """
+    output_format = "json"
+    key: str | None = None
+    i = 0
+    while i < len(tool_args):
+        token = tool_args[i]
+        if token == "--format" and i + 1 < len(tool_args):
+            output_format = tool_args[i + 1]
+            i += 2
+            continue
+        if token.startswith("--format="):
+            output_format = token.split("=", 1)[1]
+            i += 1
+            continue
+        if token.startswith("-"):
+            i += 1
+            continue
+        key = token
+        i += 1
+
+    data = _load_action_results()
+    params = data.get("params", {})
+
+    if key is None:
+        answer: Any = params if params else {}
+    else:
+        answer = params
+        for part in key.split("."):
+            if isinstance(answer, dict) and part in answer:
+                answer = answer[part]
+            else:
+                answer = None
+                break
+
+    if output_format == "yaml":
+        sys.stdout.write(yaml.safe_dump(answer, sort_keys=False))
+    else:
+        sys.stdout.write(json.dumps(answer))
+    return 0
+
+
+def _action_set(tool_args: list[str]) -> int:
+    """action-set <key>=<value> [<key>=<value> ...]
+
+    Adds the given dotted key=value pairs to the action results map. Nested
+    keys (e.g. ``foo.bar=baz``) build a nested dict, matching real Juju.
+    """
+    data = _load_action_results()
+    results = data.setdefault("results", {})
+    for arg in tool_args:
+        if arg.startswith("-"):
+            continue
+        key, sep, value = arg.partition("=")
+        if not sep:
+            raise _engine.CliError(f"action-set argument must be key=value: {arg}")
+        _set_nested(results, key.split("."), value)
+    _save_action_results(data)
+    return 0
+
+
+def _set_nested(target: dict[str, Any], keys: list[str], value: Any) -> None:
+    for key in keys[:-1]:
+        target = target.setdefault(key, {})
+        if not isinstance(target, dict):
+            raise _engine.CliError(f"cannot set nested key under non-dict value: {key}")
+    target[keys[-1]] = value
+
+
+def _action_fail(tool_args: list[str]) -> int:
+    """action-fail [message]
+
+    Marks the action as failed with the given message.
+    """
+    message = ""
+    i = 0
+    while i < len(tool_args):
+        token = tool_args[i]
+        if token == "--":
+            message = " ".join(tool_args[i + 1 :])
+            break
+        if token.startswith("-"):
+            i += 1
+            continue
+        if message:
+            message += " " + token
+        else:
+            message = token
+        i += 1
+
+    data = _load_action_results()
+    data["failed"] = True
+    data["message"] = message
+    _save_action_results(data)
+    return 0
+
+
+def _action_log(tool_args: list[str]) -> int:
+    """action-log <message>
+
+    Appends a progress message to the action's log.
+    """
+    message = ""
+    i = 0
+    while i < len(tool_args):
+        token = tool_args[i]
+        if token == "--":
+            message = " ".join(tool_args[i + 1 :])
+            break
+        if token.startswith("-"):
+            i += 1
+            continue
+        if message:
+            message += " " + token
+        else:
+            message = token
+        i += 1
+
+    data = _load_action_results()
+    data.setdefault("log", []).append(message)
+    _save_action_results(data)
+    return 0
+
+
+def _action_tool(tool: str, tool_args: list[str]) -> int:
+    if tool == "action-get":
+        return _action_get(tool_args)
+    if tool == "action-set":
+        return _action_set(tool_args)
+    if tool == "action-fail":
+        return _action_fail(tool_args)
+    if tool == "action-log":
+        return _action_log(tool_args)
+    raise _engine.CliError(f"unsupported action hook tool: {tool}")
