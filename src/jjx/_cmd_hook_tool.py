@@ -215,13 +215,13 @@ def hook_tool(args: list[str]) -> int:
         return _secret_add(tool_args, model_state, app_name, state)
 
     if tool == "secret-get":
-        return _secret_get(tool_args, model_state)
+        return _secret_get(tool_args, model_state, app_name, state)
 
     if tool == "secret-grant":
         return _secret_grant(tool_args, model_state, state)
 
     if tool == "secret-info-get":
-        return _secret_info_get(tool_args, model_state)
+        return _secret_info_get(tool_args, model_state, app_name)
 
     if tool == "secret-ids":
         return _secret_ids(model_state, app_name)
@@ -233,7 +233,7 @@ def hook_tool(args: list[str]) -> int:
         return _secret_revoke(tool_args, model_state, state)
 
     if tool == "secret-set":
-        return _secret_set(tool_args, model_state, state)
+        return _secret_set(tool_args, model_state, state, app_name)
 
     if tool == "network-get":
         return _network_get(tool_args, app_state)
@@ -550,14 +550,24 @@ def _relation_model_get(tool_args: list[str], model_state: dict[str, Any]) -> in
 # ---------------------------------------------------------------------------
 
 
+def _read_secret_file(file_path: str) -> str:
+    try:
+        return open(file_path).read()
+    except OSError as exc:
+        raise _engine.CliError(f"failed to read secret file {file_path}: {exc}") from None
+
+
 def _secret_add(
     tool_args: list[str],
     model_state: dict[str, Any],
     app_name: str,
     state: dict[str, Any],
 ) -> int:
-    """secret-add [--label <l>] [--owner application] <key>#file=<path> ..."""
+    """secret-add [--label <l>] [--description <d>] [--expire <t>] [--rotate <p>] [--owner <o>] <key>#file=<path> ..."""
     label: str | None = None
+    description: str | None = None
+    expire: str | None = None
+    rotate: str | None = None
     content: dict[str, str] = {}
     i = 0
     while i < len(tool_args):
@@ -568,6 +578,30 @@ def _secret_add(
             continue
         if token.startswith("--label="):
             label = token.split("=", 1)[1]
+            i += 1
+            continue
+        if token == "--description" and i + 1 < len(tool_args):
+            description = tool_args[i + 1]
+            i += 2
+            continue
+        if token.startswith("--description="):
+            description = token.split("=", 1)[1]
+            i += 1
+            continue
+        if token == "--expire" and i + 1 < len(tool_args):
+            expire = tool_args[i + 1]
+            i += 2
+            continue
+        if token.startswith("--expire="):
+            expire = token.split("=", 1)[1]
+            i += 1
+            continue
+        if token == "--rotate" and i + 1 < len(tool_args):
+            rotate = tool_args[i + 1]
+            i += 2
+            continue
+        if token.startswith("--rotate="):
+            rotate = token.split("=", 1)[1]
             i += 1
             continue
         if token == "--owner" and i + 1 < len(tool_args):
@@ -583,33 +617,46 @@ def _secret_add(
         # key#file=path format
         if "#file=" in token:
             key, _, file_path = token.partition("#file=")
-            try:
-                content[key] = open(file_path).read()  # noqa: SIM115
-            except OSError as exc:
-                raise _engine.CliError(f"failed to read secret file {file_path}: {exc}") from None
+            content[key] = _read_secret_file(file_path)
         i += 1
 
     secret_id = _engine._next_secret_id(model_state)
+    now = _engine._now_iso()
     secret = {
         "id": secret_id,
         "label": label,
+        "name": None,
         "owner": app_name,
-        "content": content,
+        "content": dict(content),
+        "revisions": [dict(content)],
         "revision": 1,
         "grants": [],
+        "rotate": rotate,
+        "expire": expire,
+        "description": description,
+        "observers": {},
+        "created": now,
+        "updated": now,
     }
     _engine._secrets(model_state).append(secret)
     _engine._save_state(state)
-    # secret-add prints the secret ID (the URI form) on stdout
-    sys.stdout.write(f"{secret_id}\n")
+    # secret-add prints the secret URI (secret:<id>) on stdout.
+    sys.stdout.write(f"{_engine._secret_uri_for_juju(secret)}\n")
     return 0
 
 
-def _secret_get(tool_args: list[str], model_state: dict[str, Any]) -> int:
+def _secret_get(
+    tool_args: list[str],
+    model_state: dict[str, Any],
+    app_name: str,
+    state: dict[str, Any],
+) -> int:
     """secret-get [--format=json] <id> [--label <l>] [--refresh|--peek]"""
     output_format = "json"
     secret_id: str | None = None
     label: str | None = None
+    refresh = False
+    peek = False
     i = 0
     while i < len(tool_args):
         token = tool_args[i]
@@ -629,7 +676,12 @@ def _secret_get(tool_args: list[str], model_state: dict[str, Any]) -> int:
             label = token.split("=", 1)[1]
             i += 1
             continue
-        if token in ("--refresh", "--peek"):
+        if token == "--refresh":
+            refresh = True
+            i += 1
+            continue
+        if token == "--peek":
+            peek = True
             i += 1
             continue
         if token.startswith("-"):
@@ -643,11 +695,33 @@ def _secret_get(tool_args: list[str], model_state: dict[str, Any]) -> int:
     if secret_id:
         secret = _engine._find_secret_by_id(model_state, secret_id)
     if secret is None and label:
-        secret = _engine._find_secret_by_label(model_state, label)
+        secret = _engine._find_secret_by_label(model_state, label, app_name=app_name)
     if secret is None:
         raise _engine.CliError(f"secret not found: {secret_id or label}")
 
-    _output(dict(secret.get("content", {})), output_format)
+    # Record the observer label if one was provided (the charm assigns a
+    # label when it calls get_secret(id=..., label=...)).
+    if label:
+        observer = _engine._secret_observer(secret, app_name)
+        observer["label"] = label
+
+    latest = _engine._secret_latest_revision(secret)
+    observer = _engine._secret_observer(secret, app_name)
+    tracked = observer.get("tracked_revision")
+
+    if refresh or peek:
+        revision = latest
+    elif tracked is not None:
+        revision = tracked
+    else:
+        revision = latest
+
+    if refresh:
+        observer["tracked_revision"] = latest
+
+    content = _engine._secret_content_for_revision(secret, revision)
+    _output(content, output_format)
+    _engine._save_state(state)
     return 0
 
 
@@ -688,15 +762,19 @@ def _secret_grant(tool_args: list[str], model_state: dict[str, Any], state: dict
     if secret is None:
         raise _engine.CliError(f"secret not found: {secret_id}")
 
-    grants = secret.setdefault("grants", [])
-    grant_entry = {"relation_id": relation_id, "unit": unit}
+    grants = _engine._secret_grants(secret)
+    grant_entry = {"relation_id": relation_id, "unit": unit, "app": None}
     if grant_entry not in grants:
         grants.append(grant_entry)
     _engine._save_state(state)
     return 0
 
 
-def _secret_info_get(tool_args: list[str], model_state: dict[str, Any]) -> int:
+def _secret_info_get(
+    tool_args: list[str],
+    model_state: dict[str, Any],
+    app_name: str,
+) -> int:
     """secret-info-get [--format=json] <id> | --label <l>"""
     output_format = "json"
     secret_id: str | None = None
@@ -731,20 +809,20 @@ def _secret_info_get(tool_args: list[str], model_state: dict[str, Any]) -> int:
     if secret_id:
         secret = _engine._find_secret_by_id(model_state, secret_id)
     if secret is None and label:
-        secret = _engine._find_secret_by_label(model_state, label)
+        secret = _engine._find_secret_by_label(model_state, label, app_name=app_name)
     if secret is None:
         raise _engine.CliError(f"secret not found: {secret_id or label}")
 
+    # ops expects {secret_id: {info}} — a single-entry dict keyed by the id.
     info = {
-        "revision": secret.get("revision", 1),
+        "revision": _engine._secret_latest_revision(secret),
         "label": secret.get("label"),
-        "owner": secret.get("owner"),
-        "expires": None,
-        "rotation": None,
+        "description": secret.get("description"),
+        "expiry": secret.get("expire"),
+        "rotation": secret.get("rotate"),
         "rotates": None,
-        "description": None,
     }
-    _output(info, output_format)
+    _output({_engine._secret_uri_for_juju(secret): info}, output_format)
     return 0
 
 
@@ -753,7 +831,7 @@ def _secret_ids(model_state: dict[str, Any], app_name: str) -> int:
     result = []
     for secret in _engine._secrets(model_state):
         if secret.get("owner") == app_name:
-            result.append(secret["id"])
+            result.append(_engine._secret_uri_for_juju(secret))
     sys.stdout.write(json.dumps(result))
     return 0
 
@@ -763,13 +841,22 @@ def _secret_remove(
 ) -> int:
     """secret-remove <id> [--revision <n>]"""
     secret_id: str | None = None
+    revision: int | None = None
     i = 0
     while i < len(tool_args):
         token = tool_args[i]
         if token == "--revision" and i + 1 < len(tool_args):
+            try:
+                revision = int(tool_args[i + 1])
+            except ValueError:
+                raise _engine.CliError(f"invalid --revision value: {tool_args[i + 1]}") from None
             i += 2
             continue
         if token.startswith("--revision="):
+            try:
+                revision = int(token.split("=", 1)[1])
+            except ValueError:
+                raise _engine.CliError(f"invalid --revision value: {token}") from None
             i += 1
             continue
         if token.startswith("-"):
@@ -782,9 +869,22 @@ def _secret_remove(
     if secret_id is None:
         raise _engine.CliError("secret-remove requires a secret ID")
     secret = _engine._find_secret_by_id(model_state, secret_id)
-    if secret is not None:
+    if secret is None:
+        raise _engine.CliError(f"secret not found: {secret_id}")
+
+    if revision is not None:
+        revisions = _engine._secret_revisions(secret)
+        idx = revision - 1
+        if 0 <= idx < len(revisions):
+            del revisions[idx]
+            if revisions:
+                secret["content"] = revisions[-1]
+                secret["revision"] = len(revisions)
+            else:
+                _engine._secrets(model_state).remove(secret)
+    else:
         _engine._secrets(model_state).remove(secret)
-        _engine._save_state(state)
+    _engine._save_state(state)
     return 0
 
 
@@ -816,24 +916,59 @@ def _secret_revoke(
         raise _engine.CliError("secret-revoke requires a secret ID")
     secret = _engine._find_secret_by_id(model_state, secret_id)
     if secret is not None:
-        grants = secret.get("grants", [])
+        grants = _engine._secret_grants(secret)
         secret["grants"] = [g for g in grants if g.get("relation_id") != relation_id]
         _engine._save_state(state)
     return 0
 
 
-def _secret_set(tool_args: list[str], model_state: dict[str, Any], state: dict[str, Any]) -> int:
-    """secret-set [--label <l>] <id> [key#file=<path> ...]"""
+def _secret_set(
+    tool_args: list[str],
+    model_state: dict[str, Any],
+    state: dict[str, Any],
+    app_name: str,
+) -> int:
+    """secret-set [--label <l>] [--description <d>] [--expire <t>] [--rotate <p>] [--owner <o>] <id> [key#file=<path> ...]"""
     secret_id: str | None = None
     content: dict[str, str] = {}
+    label: str | None = None
+    description: str | None = None
+    expire: str | None = None
+    rotate: str | None = None
     i = 0
     while i < len(tool_args):
         token = tool_args[i]
+        if token == "--label" and i + 1 < len(tool_args):
+            label = tool_args[i + 1]
+            i += 2
+            continue
         if token.startswith("--label="):
+            label = token.split("=", 1)[1]
             i += 1
             continue
-        if token == "--label" and i + 1 < len(tool_args):
+        if token == "--description" and i + 1 < len(tool_args):
+            description = tool_args[i + 1]
             i += 2
+            continue
+        if token.startswith("--description="):
+            description = token.split("=", 1)[1]
+            i += 1
+            continue
+        if token == "--expire" and i + 1 < len(tool_args):
+            expire = tool_args[i + 1]
+            i += 2
+            continue
+        if token.startswith("--expire="):
+            expire = token.split("=", 1)[1]
+            i += 1
+            continue
+        if token == "--rotate" and i + 1 < len(tool_args):
+            rotate = tool_args[i + 1]
+            i += 2
+            continue
+        if token.startswith("--rotate="):
+            rotate = token.split("=", 1)[1]
+            i += 1
             continue
         if token.startswith("--owner"):
             if "=" in token:
@@ -848,10 +983,7 @@ def _secret_set(tool_args: list[str], model_state: dict[str, Any], state: dict[s
             secret_id = token
         elif "#file=" in token:
             key, _, file_path = token.partition("#file=")
-            try:
-                content[key] = open(file_path).read()  # noqa: SIM115
-            except OSError as exc:
-                raise _engine.CliError(f"failed to read secret file {file_path}: {exc}") from None
+            content[key] = _read_secret_file(file_path)
         i += 1
 
     if secret_id is None:
@@ -859,9 +991,21 @@ def _secret_set(tool_args: list[str], model_state: dict[str, Any], state: dict[s
     secret = _engine._find_secret_by_id(model_state, secret_id)
     if secret is None:
         raise _engine.CliError(f"secret not found: {secret_id}")
+
     if content:
-        secret["content"].update(content)
-        secret["revision"] = secret.get("revision", 1) + 1
+        revisions = _engine._secret_revisions(secret)
+        revisions.append(dict(content))
+        secret["content"] = dict(content)
+        secret["revision"] = int(secret.get("revision", 1)) + 1
+    if label is not None:
+        secret["label"] = label
+    if description is not None:
+        secret["description"] = description
+    if expire is not None:
+        secret["expire"] = expire
+    if rotate is not None:
+        secret["rotate"] = rotate
+    secret["updated"] = _engine._now_iso()
     _engine._save_state(state)
     return 0
 

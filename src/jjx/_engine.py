@@ -214,11 +214,19 @@ def _relation_remote_app(relation: dict[str, Any], local_app: str) -> str | None
 # Secrets are stored in model_state["secrets"] as a list of dicts:
 #   {
 #     "id": "secret://<uuid>/<id>",
-#     "label": "...",
-#     "owner": "postgresql-k8s",
-#     "content": {"username": "...", "password": "..."},
-#     "revision": 1,
-#     "grants": [{"relation_id": 0, "app": "fastapi-demo"}],
+#     "label": "...",              # owner label (app secrets) or None
+#     "name": "...",               # user-facing name (user secrets) or None
+#     "owner": "<app>" | "model",  # app name for app secrets, "model" for user secrets
+#     "content": {...},            # latest revision content (revisions[-1])
+#     "revisions": [{...}, ...],   # all revisions; index 0 == revision 1
+#     "revision": 2,               # latest revision number
+#     "grants": [{"app": "<app>", "relation_id": null, "unit": null}],
+#     "rotate": "monthly" | None,
+#     "expire": "<rfc3339>" | None,
+#     "description": "..." | None,
+#     "observers": {               # per-app observer tracking
+#       "<app>": {"label": "<label>", "tracked_revision": 2}
+#     },
 #   }
 # ---------------------------------------------------------------------------
 
@@ -243,11 +251,57 @@ def _find_secret_by_id(model_state: dict[str, Any], secret_id: str) -> dict[str,
     return None
 
 
-def _find_secret_by_label(model_state: dict[str, Any], label: str) -> dict[str, Any] | None:
+def _find_secret_by_label(
+    model_state: dict[str, Any], label: str, app_name: str | None = None
+) -> dict[str, Any] | None:
+    """Find a secret by label.
+
+    If app_name is given, first check observer labels scoped to that app (so an
+    observer can look up a secret by the label it assigned), then fall back to
+    the owner label. If app_name is None, only the owner label is checked.
+    """
+    if app_name is not None:
+        for secret in _secrets(model_state):
+            observer = secret.get("observers", {}).get(app_name)
+            if observer and observer.get("label") == label:
+                return secret
     for secret in _secrets(model_state):
         if secret.get("label") == label:
             return secret
     return None
+
+
+def _secret_revisions(secret: dict[str, Any]) -> list[dict[str, str]]:
+    """Return the revision content list, migrating the legacy single-content form."""
+    revisions = secret.get("revisions")
+    if isinstance(revisions, list):
+        return revisions
+    content = secret.get("content", {})
+    migrated = [content]
+    secret["revisions"] = migrated
+    return migrated
+
+
+def _secret_latest_revision(secret: dict[str, Any]) -> int:
+    return int(secret.get("revision", 1))
+
+
+def _secret_content_for_revision(secret: dict[str, Any], revision: int) -> dict[str, str]:
+    revisions = _secret_revisions(secret)
+    idx = revision - 1
+    if 0 <= idx < len(revisions):
+        return dict(revisions[idx])
+    # Fallback to latest content if revision out of range.
+    return dict(secret.get("content", {}))
+
+
+def _secret_observer(secret: dict[str, Any], app_name: str) -> dict[str, Any]:
+    observers = secret.setdefault("observers", {})
+    return observers.setdefault(app_name, {"label": None, "tracked_revision": None})
+
+
+def _secret_grants(secret: dict[str, Any]) -> list[dict[str, Any]]:
+    return secret.setdefault("grants", [])
 
 
 def _canonical_secret_id(secret_id: str, model_uuid: str) -> str:
@@ -260,6 +314,19 @@ def _canonical_secret_id(secret_id: str, model_uuid: str) -> str:
         return f"secret://{model_uuid}/{bare}" if model_uuid else f"secret:{bare}"
     # Bare ID
     return f"secret://{model_uuid}/{secret_id}" if model_uuid else f"secret:{secret_id}"
+
+
+def _secret_uri_for_juju(secret: dict[str, Any]) -> str:
+    """Return the secret URI in the ``secret:<id>`` form jubilant/ops expect.
+
+    jubilant's SecretURI parses the unique identifier from the last ``/``
+    segment of a ``secret://<uuid>/<id>`` URI, or from ``secret:<id>``. We
+    return the shorter ``secret:<id>`` form to match real Juju CLI output.
+    """
+    full = secret.get("id", "")
+    if full.startswith("secret://"):
+        return "secret:" + full.rsplit("/", 1)[-1]
+    return full
 
 
 def _require_model_name(state: dict[str, Any], model: str | None) -> str:
@@ -1117,6 +1184,8 @@ def _build_charm_env(
     dispatch_path: str,
     workload_name: str | None = None,
     relation: dict[str, Any] | None = None,
+    secret: dict[str, Any] | None = None,
+    secret_revision: int | None = None,
 ) -> dict[str, str]:
     unit_name = app_state.get("unit", f"{app_name}/0")
 
@@ -1155,6 +1224,24 @@ def _build_charm_env(
         for var in ("JUJU_RELATION", "JUJU_RELATION_ID", "JUJU_REMOTE_APP", "JUJU_REMOTE_UNIT"):
             env.pop(var, None)
 
+    if secret is not None:
+        # ops canonicalizes the secret id to "secret:<id>" form; pass the
+        # full URI so the charm's get_secret(id=...) resolves correctly.
+        env["JUJU_SECRET_ID"] = _secret_uri_for_juju(secret)
+        observer = secret.get("observers", {}).get(app_name, {})
+        label = observer.get("label") or secret.get("label")
+        if label:
+            env["JUJU_SECRET_LABEL"] = label
+        else:
+            env.pop("JUJU_SECRET_LABEL", None)
+        if secret_revision is not None:
+            env["JUJU_SECRET_REVISION"] = str(secret_revision)
+        else:
+            env.pop("JUJU_SECRET_REVISION", None)
+    else:
+        for var in ("JUJU_SECRET_ID", "JUJU_SECRET_LABEL", "JUJU_SECRET_REVISION"):
+            env.pop(var, None)
+
     # Hook tools are at /jjx/hook-tools inside the charm runner container.
     env["PATH"] = "/jjx/hook-tools:/usr/bin:/bin"
     # Hook tools do `import jjx`, so they need the same PYTHONPATH as the
@@ -1173,6 +1260,8 @@ def _run_charm_event(
     dispatch_path: str,
     workload_name: str | None = None,
     relation: dict[str, Any] | None = None,
+    secret: dict[str, Any] | None = None,
+    secret_revision: int | None = None,
 ) -> None:
     state = _load_state()
     model_state = state["models"][model_name]
@@ -1204,6 +1293,8 @@ def _run_charm_event(
         dispatch_path=dispatch_path,
         workload_name=workload,
         relation=relation,
+        secret=secret,
+        secret_revision=secret_revision,
     )
 
     container_name = app_state.get("container_name", "")
@@ -1389,6 +1480,23 @@ def _kill_background_processes(app_name: str | None = None) -> None:
 
 def _run_config_event_flow(model_name: str, app_name: str) -> None:
     _run_charm_event(model_name, app_name, "config-changed", "hooks/config-changed")
+
+
+def _run_secret_changed_event(model_name: str, app_name: str, secret: dict[str, Any]) -> None:
+    """Dispatch a secret-changed event on the charm for the given secret.
+
+    This is fired when a secret the charm is observing gets a new revision
+    (via ``juju update-secret`` for user secrets, or ``secret-set`` for
+    app-owned secrets). The charm reads the new content with
+    ``get_content(refresh=True)``.
+    """
+    _run_charm_event(
+        model_name,
+        app_name,
+        "secret-changed",
+        "hooks/secret-changed",
+        secret=secret,
+    )
 
 
 def _run_relation_event_flow(

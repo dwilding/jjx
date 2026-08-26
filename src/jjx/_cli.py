@@ -26,6 +26,7 @@ from . import (
     _cmd_offer,
     _cmd_remove_application,
     _cmd_run,
+    _cmd_secret,
     _cmd_status,
     _cmd_wait_for,
     _engine,
@@ -84,6 +85,18 @@ def run_juju_command(argv: list[str]) -> int:
         return _cmd_misc.show_model(rest, model)
     if command == "models":
         return _cmd_misc.models(rest)
+    if command == "add-secret":
+        return _cmd_secret.add_secret(rest, model)
+    if command == "grant-secret":
+        return _cmd_secret.grant_secret(rest, model)
+    if command == "update-secret":
+        return _cmd_secret.update_secret(rest, model)
+    if command == "secrets":
+        return _cmd_secret.secrets(rest, model)
+    if command == "show-secret":
+        return _cmd_secret.show_secret(rest, model)
+    if command == "remove-secret":
+        return _cmd_secret.remove_secret(rest, model)
 
     raise _engine.CliError(f"unknown command: {command}")
 
