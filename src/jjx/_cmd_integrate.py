@@ -211,6 +211,30 @@ def integrate(args: list[str], model: str | None) -> int:
     assert relation is not None
 
     _engine._run_relation_event_flow(model_name, real_app, relation, event="created")
+
+    # Re-populate after relation-created, so the virtual provider can pick up
+    # data the charm writes during that event (e.g. the requirer's ``database``
+    # field, written by DatabaseRequires.set_database). This lets the postgres
+    # virtual charm create the database the charm actually requests rather than
+    # relying on a deploy-time default.
+    if app1_virtual or app2_virtual:
+        state = _engine._load_state()
+        model_state = state["models"][model_name]
+        relation = _engine._find_relation_by_id(model_state, relation_id)
+        assert relation is not None
+        apps = model_state.get("apps", {})
+        for virtual_app, virtual_kind in [(app1, app1_virtual), (app2, app2_virtual)]:
+            if virtual_kind is None:
+                continue
+            spec = _virtual_registry.get_spec(virtual_kind)
+            if spec is not None:
+                info = apps[virtual_app].get(spec.info_key, {})
+                spec.populate(model_state, relation, virtual_app, info)
+                break
+        _engine._save_state(state)
+        relation = _engine._find_relation_by_id(model_state, relation_id)
+        assert relation is not None
+
     _engine._run_relation_event_flow(model_name, real_app, relation, event="joined")
     _engine._run_relation_event_flow(model_name, real_app, relation, event="changed")
 
@@ -343,6 +367,26 @@ def _integrate_cross_model(
     assert relation is not None
 
     _engine._run_relation_event_flow(local_model_name, local_app, relation, event="created")
+
+    # Re-populate after relation-created, so the virtual provider can pick up
+    # data the charm writes during that event (e.g. the requirer's ``database``
+    # field, written by DatabaseRequires.set_database). This lets the postgres
+    # virtual charm create the database the charm actually requests.
+    if remote_virtual is not None:
+        spec = _virtual_registry.get_spec(remote_virtual)
+        if spec is not None:
+            state = _engine._load_state()
+            local_model_state = state["models"][local_model_name]
+            remote_model_state = state["models"][remote_model_name]
+            relation = _engine._find_relation_by_id(local_model_state, relation_id)
+            assert relation is not None
+            remote_app_state = remote_model_state["apps"][remote_app_name]
+            info = remote_app_state.get(spec.info_key, {})
+            spec.populate(remote_model_state, relation, remote_app_name, info)
+            _engine._save_state(state)
+            relation = _engine._find_relation_by_id(local_model_state, relation_id)
+            assert relation is not None
+
     _engine._run_relation_event_flow(local_model_name, local_app, relation, event="joined")
     _engine._run_relation_event_flow(local_model_name, local_app, relation, event="changed")
 
