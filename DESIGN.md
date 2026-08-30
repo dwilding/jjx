@@ -86,7 +86,7 @@ All virtual charms are registered in a central registry (`_virtual_registry.py`)
 
 Currently supported:
 
-- `postgresql-k8s` — starts a real PostgreSQL 16 container and provides the `postgresql_client` interface.
+- `postgresql-k8s` — starts a real PostgreSQL 16 container and provides the `postgresql_client` interface. The database is created lazily at integrate time, using the database name the requirer requests (falling back to the requirer's app name), so charms that request a name other than the default receive credentials for the right database.
 - `loki-k8s` — starts a real Loki container and provides the `loki_push_api` interface. Workload logs flow via real Pebble log-targets.
 - `prometheus-k8s` — starts a real Prometheus container (with `--web.enable-lifecycle` for config reloads) and consumes the `prometheus_scrape` interface. Configures itself from the charm's relation data.
 - `grafana-k8s` — starts a real Grafana container and consumes the `grafana_dashboard` interface. Provisions Prometheus and Loki as datasources (via file-based provisioning, applied with a container restart since Grafana does not re-provision datasources on SIGHUP), imports dashboards from relation data, and injects datasource variables (`${prometheusds}`, `${lokids}`) into imported dashboards so Grafana can resolve the placeholder UIDs — mirroring what the real grafana-k8s charm does.
