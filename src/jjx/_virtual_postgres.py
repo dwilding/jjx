@@ -137,12 +137,15 @@ def _ensure_database(pg_info: dict[str, Any], database_name: str) -> tuple[str, 
     CREATE by default, so we explicitly grant schema permissions for the app
     to create tables.
 
-    The database name is validated against a safe identifier charset before
-    being used in SQL, preventing injection from arbitrary relation data.
+    The database name is validated against a safe charset (alphanumeric,
+    underscore, hyphen) before being used in SQL, preventing injection from
+    arbitrary relation data. Hyphens are allowed because Juju app names (used
+    as the fallback database name) commonly contain them; the name is always
+    quoted in SQL statements.
     Safe to call more than once: ``CREATE DATABASE`` is skipped if the database
     already exists (e.g. on re-populate after relation-created).
     """
-    if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", database_name):
+    if not re.match(r"^[A-Za-z_][A-Za-z0-9_-]*$", database_name):
         raise _engine.CliError(f"invalid database name: {database_name!r}")
 
     container_name = pg_info["container_name"]
@@ -154,9 +157,17 @@ def _ensure_database(pg_info: dict[str, Any], database_name: str) -> tuple[str, 
     if database_name != "postgres":
         result = _docker_exec(
             container_name,
-            ["psql", "-U", "postgres", "-d", "postgres", "-tAc", "\\l"],
+            [
+                "psql",
+                "-U",
+                "postgres",
+                "-d",
+                "postgres",
+                "-tAc",
+                f"SELECT 1 FROM pg_database WHERE datname = '{database_name}'",
+            ],
         )
-        if f'"{database_name}"' not in result:
+        if "1" not in result.strip():
             _docker_exec(
                 container_name,
                 [
@@ -185,10 +196,78 @@ def _ensure_database(pg_info: dict[str, Any], database_name: str) -> tuple[str, 
             f"CREATE USER {username} WITH PASSWORD '{password}';",
             "-c",
             f'GRANT ALL PRIVILEGES ON DATABASE "{database_name}" TO {username};',
+            "-c",
             f"GRANT ALL ON SCHEMA public TO {username};",
         ],
     )
     return username, password
+
+
+def _ensure_database_with_user(
+    pg_info: dict[str, Any],
+    database_name: str,
+    username: str,
+    password: str,
+) -> None:
+    """Ensure ``database_name`` exists and grant ``username`` access to it.
+
+    Used on re-populate when the database name may have changed (e.g. from the
+    fallback app name to the name the requirer actually requests). The database
+    is created if it doesn't exist, and the existing user is granted access.
+    Does not create a new user — the credentials stay stable across re-populates
+    so the charm doesn't see a secret content change.
+    """
+    if not re.match(r"^[A-Za-z_][A-Za-z0-9_-]*$", database_name):
+        raise _engine.CliError(f"invalid database name: {database_name!r}")
+
+    container_name = pg_info["container_name"]
+
+    # CREATE DATABASE doesn't support IF NOT EXISTS, so check first. The
+    # postgres database always exists (it's the maintenance database).
+    if database_name != "postgres":
+        result = _docker_exec(
+            container_name,
+            [
+                "psql",
+                "-U",
+                "postgres",
+                "-d",
+                "postgres",
+                "-tAc",
+                f"SELECT 1 FROM pg_database WHERE datname = '{database_name}'",
+            ],
+        )
+        if "1" not in result.strip():
+            _docker_exec(
+                container_name,
+                [
+                    "psql",
+                    "-U",
+                    "postgres",
+                    "-d",
+                    "postgres",
+                    "-v",
+                    "ON_ERROR_STOP=1",
+                    "-c",
+                    f'CREATE DATABASE "{database_name}";',
+                ],
+            )
+    _docker_exec(
+        container_name,
+        [
+            "psql",
+            "-U",
+            "postgres",
+            "-d",
+            database_name,
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-c",
+            f'GRANT ALL PRIVILEGES ON DATABASE "{database_name}" TO {username};',
+            "-c",
+            f"GRANT ALL ON SCHEMA public TO {username};",
+        ],
+    )
 
 
 def populate_relation(
@@ -238,24 +317,30 @@ def populate_relation(
     requirer_app_bucket = requirer_data.get("app", {})
     database_name = requirer_app_bucket.get("database") or requirer_app
 
-    # Lazily create the database + a dedicated user.
-    username, password = _ensure_database(pg_info, database_name)
-
-    # Create or reuse the secret for this relation. On re-populate (after the
-    # requirer has set its ``database`` field), reuse the existing secret so we
-    # don't accumulate stale secrets. The secret content is updated if the
-    # database name or credentials changed.
+    # Create or reuse the secret for this relation. On the first call, create
+    # the database + a dedicated user and store the credentials in a new secret.
+    # On re-populate (after the requirer has set its ``database`` field), reuse
+    # the existing secret's credentials so the charm doesn't see a credential
+    # change — only the database name may differ. The new database is created
+    # and the existing user is granted access to it.
     secret_id = _engine._next_secret_id(model_state)
+    existing_secret = None
     for secret in _engine._secrets(model_state):
         grants = secret.get("grants", [])
         if any(g.get("relation_id") == relation["id"] for g in grants):
+            existing_secret = secret
             secret_id = secret["id"]
-            secret["content"] = {
-                "username": username,
-                "password": password,
-            }
             break
+
+    if existing_secret is not None:
+        # Reuse the existing credentials; just ensure the (possibly new)
+        # database exists and the existing user can access it.
+        username = existing_secret["content"]["username"]
+        password = existing_secret["content"]["password"]
+        _ensure_database_with_user(pg_info, database_name, username, password)
     else:
+        # First call: create the database + a new dedicated user.
+        username, password = _ensure_database(pg_info, database_name)
         secret = {
             "id": secret_id,
             "label": None,
