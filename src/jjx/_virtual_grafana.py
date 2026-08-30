@@ -320,8 +320,12 @@ def populate_relation(
         elif spec.display_name == "Loki API":
             loki_url = url
 
-    # Update datasources
-    update_datasources(grafana_info, prometheus_url, loki_url)
-
-    # Import dashboards from the charm's relation databag
+    # Import dashboards first, then update datasources (which restarts
+    # Grafana). Writing dashboards before the restart ensures they are on
+    # disk when Grafana scans its provisioning directory on startup —
+    # otherwise Grafana only picks them up on its next 5-second periodic
+    # scan, which may not happen before jjx returns. This matches the real
+    # grafana-k8s charm's reconcile(), which writes dashboards first, then
+    # restarts only if datasource/config changed.
     import_dashboards(grafana_info, relation, charm_app)
+    update_datasources(grafana_info, prometheus_url, loki_url)
