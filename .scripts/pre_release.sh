@@ -10,11 +10,11 @@ if ! git diff --quiet -- uv.lock; then
   just lint
   just test
   git commit -am "bump deps"
-  summary+="✅ bumped deps
+  summary+="✅ Bumped deps
 "
 elif ! git diff --quiet -- .github/workflows; then
   git commit -am "bump deps"
-  summary+="✅ bumped deps (workflows only)
+  summary+="✅ Bumped deps (workflows only)
 "
 fi
 
@@ -24,7 +24,7 @@ sed -i "s/^PEBBLE_VERSION = .*/PEBBLE_VERSION = \"$tag\"/" src/jjx/_version.py
 if ! git diff --quiet -- src/jjx/_version.py; then
   just functional
   git commit -am "bump Pebble"
-  summary+="✅ bumped Pebble to $tag
+  summary+="✅ Bumped Pebble to $tag
 "
 fi
 
@@ -36,7 +36,7 @@ sed -i "s/^JUJU_VERSION = .*/JUJU_VERSION = \"$version\"/" src/jjx/_version.py
 if ! git diff --quiet -- src/jjx/_version.py; then
   just functional
   git commit -am "bump Juju"
-  summary+="✅ bumped Juju to $version
+  summary+="✅ Bumped Juju to $version
 "
 fi
 
@@ -45,7 +45,7 @@ just charms
 if ! git diff --quiet -- tests/functional/charms; then
   just functional
   git commit -am "refresh charms"
-  summary+="✅ refreshed charms
+  summary+="✅ Refreshed charms
 "
 fi
 
