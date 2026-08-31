@@ -1,6 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
+summary=""
+
 # Dependencies
 just deps
 if ! git diff --quiet -- uv.lock; then
@@ -8,10 +10,12 @@ if ! git diff --quiet -- uv.lock; then
   just lint
   just test
   git commit -am "bump deps"
-  echo "bumped deps"
+  summary+="✅ bumped deps
+"
 elif ! git diff --quiet -- .github/workflows; then
   git commit -am "bump deps"
-  echo "bumped deps (workflows only)"
+  summary+="✅ bumped deps (workflows only)
+"
 fi
 
 # Pebble
@@ -20,7 +24,8 @@ sed -i "s/^PEBBLE_VERSION = .*/PEBBLE_VERSION = \"$tag\"/" src/jjx/_version.py
 if ! git diff --quiet -- src/jjx/_version.py; then
   just functional
   git commit -am "bump Pebble"
-  echo "bumped Pebble to $tag"
+  summary+="✅ bumped Pebble to $tag
+"
 fi
 
 # Juju
@@ -31,7 +36,8 @@ sed -i "s/^JUJU_VERSION = .*/JUJU_VERSION = \"$version\"/" src/jjx/_version.py
 if ! git diff --quiet -- src/jjx/_version.py; then
   just functional
   git commit -am "bump Juju"
-  echo "bumped Juju to $version"
+  summary+="✅ bumped Juju to $version
+"
 fi
 
 # Charms
@@ -39,5 +45,12 @@ just charms
 if ! git diff --quiet -- tests/functional/charms; then
   just functional
   git commit -am "refresh charms"
-  echo "refreshed charms"
+  summary+="✅ refreshed charms
+"
+fi
+
+# The end!
+if [[ -n $summary ]]; then
+  echo
+  printf '%s' "$summary"
 fi
