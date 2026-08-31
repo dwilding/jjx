@@ -810,29 +810,56 @@ def _charm_runner_name(model_name: str) -> str:
     return _sanitize_container_name(f"{model_name}-operator")
 
 
-def _ensure_charm_runner_image() -> None:
-    """Pull the charm runner image if it is not present locally."""
-    result = subprocess.run(
-        [_CONTAINER_BINARY, "image", "inspect", CHARM_RUNNER_IMAGE],
+def _docker_pull_with_retry(image: str) -> None:
+    """Pull a Docker image, retrying on failure with linear backoff.
+
+    Skips the pull when the image is already present locally. Retries up to
+    3 times (5s, then 10s) and prints a message on each retry. Retries
+    ``docker pull`` rather than ``docker run`` — retrying container creation
+    would leave orphaned containers behind.
+    """
+    inspect = subprocess.run(
+        [_CONTAINER_BINARY, "image", "inspect", image],
         capture_output=True,
         text=True,
         check=False,
     )
-    if result.returncode == 0:
+    if inspect.returncode == 0:
         return
-    print(f"Pulling charm runner image {CHARM_RUNNER_IMAGE} ...", flush=True)
-    try:
-        subprocess.run(
-            [_CONTAINER_BINARY, "pull", CHARM_RUNNER_IMAGE],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except subprocess.CalledProcessError as exc:
-        raise CliError(
-            f"failed to pull charm runner image {CHARM_RUNNER_IMAGE}: "
-            f"{exc.stderr.strip() or exc.stdout.strip()}"
-        ) from None
+
+    delays = (5, 10)
+    last_exc: subprocess.CalledProcessError | None = None
+    for attempt in range(1, 4):
+        print(f"Pulling image {image} ...", flush=True)
+        try:
+            subprocess.run(
+                [_CONTAINER_BINARY, "pull", image],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            return
+        except subprocess.CalledProcessError as exc:
+            last_exc = exc
+            if attempt >= 3:
+                break
+            print(
+                f"  pull failed (attempt {attempt}/3): "
+                f"{exc.stderr.strip() or exc.stdout.strip() or 'unknown error'}; "
+                f"retrying in {delays[attempt - 1]}s",
+                flush=True,
+            )
+            time.sleep(delays[attempt - 1])
+
+    raise CliError(
+        f"failed to pull image {image} after 3 attempts: "
+        f"{last_exc.stderr.strip() or last_exc.stdout.strip() if last_exc else 'unknown error'}"
+    ) from None
+
+
+def _ensure_charm_runner_image() -> None:
+    """Pull the charm runner image if it is not present locally."""
+    _docker_pull_with_retry(CHARM_RUNNER_IMAGE)
 
 
 def _start_charm_runner(
@@ -1018,30 +1045,51 @@ def _resolve_pebble_binary() -> Path:
 
     cache_path.parent.mkdir(parents=True, exist_ok=True)
 
-    try:
-        request = Request(download_url, headers={"User-Agent": "jjx"})
-        with urlopen(request, timeout=60) as response:
-            archive_bytes = io.BytesIO(response.read())
-            with tarfile.open(fileobj=archive_bytes, mode="r:gz") as archive:
-                member = next(
-                    (
-                        item
-                        for item in archive.getmembers()
-                        if item.name.endswith("/pebble") or item.name == "pebble"
-                    ),
-                    None,
-                )
-                if member is None:
-                    raise CliError(f"pebble archive did not contain a pebble binary: {asset_name}")
-                extracted = archive.extractfile(member)
-                if extracted is None:
-                    raise CliError(f"failed to extract pebble binary from {asset_name}")
-                cache_path.write_bytes(extracted.read())
-    except (HTTPError, URLError, TimeoutError, tarfile.TarError, OSError) as exc:
-        raise CliError(f"failed to download pebble: {exc}") from None
+    # Retry the download with the same linear backoff as Docker image pulls.
+    delays = (5, 10)
+    last_exc: Exception | None = None
+    for attempt in range(1, 4):
+        try:
+            _download_pebble_binary(download_url, asset_name, cache_path)
+            cache_path.chmod(0o755)
+            return cache_path
+        except (HTTPError, URLError, TimeoutError, tarfile.TarError, OSError, CliError) as exc:
+            last_exc = exc
+            if attempt >= 3:
+                break
+            print(
+                f"  pebble download failed (attempt {attempt}/3): {exc}; "
+                f"retrying in {delays[attempt - 1]}s",
+                flush=True,
+            )
+            time.sleep(delays[attempt - 1])
 
-    cache_path.chmod(0o755)
-    return cache_path
+    raise CliError(f"failed to download pebble after 3 attempts: {last_exc}") from None
+
+
+def _download_pebble_binary(download_url: str, asset_name: str, cache_path: Path) -> None:
+    """Download and extract the pebble binary from the GitHub release archive.
+
+    Raises on any HTTP, URL, timeout, tar, or OS error so the caller can retry.
+    """
+    request = Request(download_url, headers={"User-Agent": "jjx"})
+    with urlopen(request, timeout=60) as response:
+        archive_bytes = io.BytesIO(response.read())
+        with tarfile.open(fileobj=archive_bytes, mode="r:gz") as archive:
+            member = next(
+                (
+                    item
+                    for item in archive.getmembers()
+                    if item.name.endswith("/pebble") or item.name == "pebble"
+                ),
+                None,
+            )
+            if member is None:
+                raise CliError(f"pebble archive did not contain a pebble binary: {asset_name}")
+            extracted = archive.extractfile(member)
+            if extracted is None:
+                raise CliError(f"failed to extract pebble binary from {asset_name}")
+            cache_path.write_bytes(extracted.read())
 
 
 def _project_venv_python() -> Path | None:

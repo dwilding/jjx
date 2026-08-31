@@ -242,6 +242,8 @@ def deploy(args: list[str], model: str | None) -> int:
     # enabled) so that charm layers using override: merge inherit them correctly.
     _copy_image_pebble_layers(image, pebble_layers_dir)
 
+    _engine._docker_pull_with_retry(image)
+
     mounts = [
         (str(pebble_binary), "/charm/bin/pebble", True),
         (str(jjx_dir), "/jjx", False),

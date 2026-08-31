@@ -83,6 +83,7 @@ def start_grafana(
     _write_datasource_config(ds_dir, prometheus_url="", loki_url="")
     _write_dashboard_provider_config(dash_dir)
 
+    _engine._docker_pull_with_retry(GRAFANA_IMAGE)
     container_id = _engine._docker_run(
         GRAFANA_IMAGE,
         container_name,

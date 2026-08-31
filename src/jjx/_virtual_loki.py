@@ -75,6 +75,7 @@ def start_loki(
     # Remove any stale container with the same name.
     _engine._docker_rm(container_name)
 
+    _engine._docker_pull_with_retry(LOKI_IMAGE)
     container_id = _engine._docker_run(
         LOKI_IMAGE,
         container_name,
