@@ -6,6 +6,7 @@ import json
 import sys
 
 from . import _engine
+from ._version import juju_version_string
 
 
 def status(args: list[str], model: str | None) -> int:
@@ -34,7 +35,7 @@ def status(args: list[str], model: str | None) -> int:
             "type": "caas",
             "controller": "jjx",
             "cloud": "localhost",
-            "version": "3.6.0",
+            "version": juju_version_string(),
             "model-status": {
                 "current": "available",
                 "message": "available",

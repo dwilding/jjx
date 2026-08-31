@@ -10,6 +10,7 @@ import json
 import sys
 
 from . import _engine
+from ._version import juju_version_string
 
 
 def switch(args: list[str]) -> int:
@@ -25,10 +26,11 @@ def switch(args: list[str]) -> int:
 
 def version(args: list[str]) -> int:
     """Execute the version command."""
-    # jubilant calls `juju version --format json --all`
-    # Return a minimal version response.
+    # jubilant calls `juju version --format json --all` and parses the
+    # "version" field with Version._from_dict, which requires the
+    # major.minor.patch-release-arch form (a bare "4.0.14" is rejected).
     result = {
-        "version": "3.6.0",
+        "version": juju_version_string(),
         "git-hash": "jjx",
     }
     sys.stdout.write(json.dumps(result))
@@ -53,15 +55,22 @@ def show_model(args: list[str], model: str | None) -> int:
     if model_state is None:
         raise _engine.CliError(f"ERROR model {target_model} does not exist")
 
+    # Juju 4 (and jubilant's ModelInfo parser) uses these field names:
+    # short-name, model-uuid, model-type, controller-uuid, controller-name,
+    # is-controller. The older 3.x names (type, controller, uuid) are no
+    # longer parsed. jjx has no real controller, so we use a fixed UUID.
     result = {
         target_model: {
             "name": target_model,
-            "type": "caas",
-            "controller": "jjx",
+            "short-name": target_model,
+            "model-uuid": model_state.get("uuid", ""),
+            "model-type": "caas",
+            "controller-uuid": "00000000-0000-0000-0000-000000000000",
+            "controller-name": "jjx",
+            "is-controller": False,
             "cloud": "localhost",
-            "uuid": model_state.get("uuid", ""),
             "life": "alive",
-            "model-status": {
+            "status": {
                 "current": "available",
                 "message": "available",
             },
@@ -74,15 +83,24 @@ def show_model(args: list[str], model: str | None) -> int:
 def models(args: list[str]) -> int:
     """Execute the models command."""
     state = _engine._load_state()
+    # Juju 4 uses short-name, model-uuid, model-type, controller-uuid,
+    # controller-name, is-controller (matching show-model). jubilant does
+    # not parse `juju models` output, but we keep the field names consistent
+    # with real Juju 4 for anyone reading the raw output.
     result = {
         "models": [
             {
                 "name": name,
-                "type": "caas",
-                "controller": "jjx",
+                "short-name": name,
+                "model-uuid": ms.get("uuid", ""),
+                "model-type": "caas",
+                "controller-uuid": "00000000-0000-0000-0000-000000000000",
+                "controller-name": "jjx",
+                "is-controller": False,
                 "cloud": "localhost",
+                "life": "alive",
             }
-            for name in state.get("models", {})
+            for name, ms in state.get("models", {}).items()
         ],
     }
     sys.stdout.write(json.dumps(result))

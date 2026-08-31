@@ -26,7 +26,7 @@ from urllib.request import Request, urlopen
 
 import yaml
 
-from ._version import PEBBLE_VERSION
+from ._version import JUJU_VERSION, PEBBLE_VERSION
 
 STATE_DIR_NAME = ".jjx"
 STATE_FILE_NAME = "state.json"
@@ -1203,7 +1203,10 @@ def _build_charm_env(
             "JUJU_MODEL_NAME": model_name,
             "JUJU_MODEL_UUID": model_state["uuid"],
             "JUJU_UNIT_NAME": unit_name,
-            "JUJU_VERSION": "3.6.0",
+            # ops's JujuVersion parser accepts only major.minor[.patch]; the
+            # -release-arch suffix used for the jubilant-facing version string
+            # would be rejected here, so JUJU_VERSION is the bare form.
+            "JUJU_VERSION": JUJU_VERSION,
             # Inside the charm runner container, the charm directory is
             # bind-mounted at /charm, matching the path real Juju uses.
             "JUJU_CHARM_DIR": "/charm",
