@@ -4,7 +4,7 @@ set -euo pipefail
 summary=""
 
 # Dependencies
-just deps
+uv run --script .scripts/bump_deps.py
 if ! git diff --quiet -- uv.lock; then
   just format
   just lint
@@ -41,7 +41,7 @@ if ! git diff --quiet -- src/jjx/_version.py; then
 fi
 
 # Charms
-just charms
+.scripts/refresh_charms.sh
 if ! git diff --quiet -- tests/functional/charms; then
   just functional
   git commit -am "refresh charms"
