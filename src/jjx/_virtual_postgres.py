@@ -99,6 +99,7 @@ def start_postgres(
     _engine._docker_rm(container_name)
 
     postgres_password = _generate_password()
+    _engine._docker_pull_with_retry(POSTGRES_IMAGE)
     container_id = _engine._docker_run(
         POSTGRES_IMAGE,
         container_name,

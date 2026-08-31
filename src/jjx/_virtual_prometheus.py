@@ -79,6 +79,7 @@ def start_prometheus(
     config_dir.chmod(0o755)
     (config_dir / "prometheus.yml").chmod(0o644)
 
+    _engine._docker_pull_with_retry(PROMETHEUS_IMAGE)
     container_id = _engine._docker_run(
         PROMETHEUS_IMAGE,
         container_name,

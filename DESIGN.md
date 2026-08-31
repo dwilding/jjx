@@ -176,11 +176,11 @@ Deploy flow:
 
 1. ensure `./.jjx` exists and load state
 2. stage runtime charm files in `./.jjx/charm/` (`src/`, `metadata.yaml`, `config.yaml`)
-3. start workload container and Pebble with explicit `--network bridge` (no host networking)
+3. pre-pull the workload image with retry (see "image pull retries" below), then start workload container and Pebble with explicit `--network bridge` (no host networking)
    - Pebble is started with `run --hold --create-dirs` so baked-in layers (e.g. Rockcraft layers with `startup: enabled`) do not autostart services before the charm's pebble-ready hook fires — matching real Juju, which also uses `--hold`
    - if `JJX_PUBLISH` is set to `HOST_PORT:CONTAINER_PORT`, add port publish `127.0.0.1:HOST_PORT:CONTAINER_PORT`
    - the workload container's IP is stored in `state.json` as `container_ip` so hook tools (e.g. `network-get`) can access it without calling Docker directly
-4. start charm runner container (`--network=container:<workload>`, bind-mounts for Python, venv, jjx source, charm dir, state dir)
+4. start charm runner container (`--network=container:<workload>`, bind-mounts for Python, venv, jjx source, charm dir, state dir) — its image is pre-pulled the same way
 5. wait for Pebble socket (`/jjx/socket`) to be connectable inside charm runner
 6. generate hook tool scripts in `./.jjx/hook-tools/` (Python scripts with `#!/python/bin/python3.XX` shebangs)
 7. run `config-changed` hook via `docker exec` into charm runner (Pebble socket symlink does **not** exist yet — charm cannot reach Pebble, matching real Juju)
@@ -209,6 +209,16 @@ file (not in `state.json`) so teardown can find and kill it. State writes are
 atomic (temp file + `os.replace`) to prevent torn JSON if a `juju status` read
 overlaps a background write. No file locking — a flock around event dispatch
 would deadlock on hook tool subprocesses.
+
+### image pull retries
+
+All Docker image pulls (charm runner, workload, and virtual charm images) go
+through `_docker_pull_with_retry` in `src/jjx/_engine.py`, which retries
+`docker pull` up to 3 times with linear backoff (5s, then 10s) and skips images
+already present locally. The Pebble binary download uses the same pattern. The
+pull is always separated from the run: jjx pre-pulls, then calls `docker run`
+(which is not retried — retrying container creation would leave orphaned
+containers).
 
 ### hook failures
 
