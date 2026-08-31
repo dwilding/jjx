@@ -28,56 +28,12 @@ deps:
   uv run --script .scripts/bump_deps.py
 
 [private]
-pebble:
-  #!/bin/bash
-  set -euo pipefail
-  tag=$(curl -fsSL https://api.github.com/repos/canonical/pebble/releases/latest | jq -r .tag_name)
-  sed -i "s/^PEBBLE_VERSION = .*/PEBBLE_VERSION = \"$tag\"/" src/jjx/_version.py
-  echo "Set PEBBLE_VERSION to $tag"
-
-[private]
-juju:
-  #!/bin/bash
-  set -euo pipefail
-  tag=$(curl -fsSL https://api.github.com/repos/juju/juju/releases/latest | jq -r .tag_name)
-  version=${tag#v}
-  [[ $version == 4.* ]]
-  sed -i "s/^JUJU_VERSION = .*/JUJU_VERSION = \"$version\"/" src/jjx/_version.py
-  echo "Set JUJU_VERSION to $version"
-
-[private]
 charms:
-  #!/bin/bash
-  set -euo pipefail
-  rm -rf tests/functional/charms/*
-  rm -rf operator
-  git clone --depth 1 --single-branch https://github.com/canonical/operator.git
-  cp -r operator/examples/k8s-2-configurable tests/functional/charms
-  rm -rf operator
-  uv run --script .scripts/patch_charms.py
-  cd tests/functional/charms/k8s-2-configurable
-  UV_NO_CONFIG=1 tox -e format,lint,unit
+  .scripts/refresh_charms.sh
 
 [private]
 pre-release:
-  @echo 'Do these steps before each release. If any step fails, stop and investigate the failure - don'\''t continue the process.'
-  @echo ''
-  @echo '1. `just deps`. If `uv.lock` changed:'
-  @echo '  a. `just format`'
-  @echo '  b. `just lint`'
-  @echo '  c. `just test`'
-  @echo '  d. `git commit -am "bump deps"`'
-  @echo '1. (continued) If only workflow YAML files changed:'
-  @echo '  a. `git commit -am "bump deps"`'
-  @echo '2. `just pebble`. If `PEBBLE_VERSION` changed:'
-  @echo '  a. `just functional`'
-  @echo '  b. `git commit -am "bump Pebble"`'
-  @echo '3. `just juju`. If `JUJU_VERSION` changed:'
-  @echo '  a. `just functional`'
-  @echo '  b. `git commit -am "bump Juju version"`'
-  @echo '4. `just charms`. If any files changed:'
-  @echo '  a. `just functional`'
-  @echo '  b. `git commit -am "refresh charms"`'
+  .scripts/pre_release.sh
 
 [private]
 clean-docker:
