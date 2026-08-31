@@ -59,6 +59,7 @@ Supported:
 
 - single application
 - single unit (`app/0`)
+- Juju 4.x only — jjx reports a pinned 4.x version (see `juju version` below) and emits Juju 4 JSON field names. It is not tested against Juju 3.x and does not try to be cross-version.
 - deploy via a `.charm` argument interpreted as a trigger to run local `./src`
 - config updates and status reporting
 - hook tools needed by the charm
@@ -256,9 +257,9 @@ jjx implements several juju commands that jubilant/pytest-jubilant may call duri
 - `juju offer` — records a cross-model offer in model state
 - `juju run` — executes actions on real charms (dispatching the `actions/<name>` hook via `docker exec`) and on virtual charms (returning dynamically-computed results)
 - `juju switch` — no-op (jjx always uses `--model`)
-- `juju version` — returns a minimal version response
-- `juju show-model` — returns model metadata
-- `juju models` — lists all models in state
+- `juju version` — returns a version response. The `version` string is in `major.minor.patch-release-arch` form (e.g. `4.0.14-jjx-amd64`), which is what jubilant's `Version._from_dict` parser requires; a bare `major.minor.patch` is rejected. The version jjx reports is pinned in `jjx/_version.py` (`JUJU_VERSION` for the bare form passed to charm code via `JUJU_VERSION`, `juju_version_string()` for the jubilant-facing form). The two formats differ because ops's `JujuVersion` parser (which reads `JUJU_VERSION`) rejects the `-release-arch` suffix.
+- `juju show-model` — returns model metadata. Uses the Juju 4 field names (`short-name`, `model-uuid`, `model-type`, `controller-uuid`, `controller-name`, `is-controller`, `status`) that jubilant's `ModelInfo._from_dict` parser requires; the older 3.x names (`type`, `controller`, `uuid`, `model-status`) are no longer parsed.
+- `juju models` — lists all models in state, using the same Juju 4 field names as `show-model`
 - `juju add-secret` — creates a user secret owned by the model; prints the secret URI
 - `juju grant-secret` — grants an application read access to a user secret
 - `juju update-secret` — creates a new revision of a secret's content and dispatches `secret-changed` to every observing application

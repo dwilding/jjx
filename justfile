@@ -31,9 +31,19 @@ deps:
 pebble:
   #!/bin/bash
   set -euo pipefail
-  latest=$(curl -fsSL https://api.github.com/repos/canonical/pebble/releases/latest | jq -r .tag_name)
-  sed -i "s/^PEBBLE_VERSION = .*/PEBBLE_VERSION = \"$latest\"/" src/jjx/_version.py
-  echo "Set PEBBLE_VERSION to $latest"
+  tag=$(curl -fsSL https://api.github.com/repos/canonical/pebble/releases/latest | jq -r .tag_name)
+  sed -i "s/^PEBBLE_VERSION = .*/PEBBLE_VERSION = \"$tag\"/" src/jjx/_version.py
+  echo "Set PEBBLE_VERSION to $tag"
+
+[private]
+juju:
+  #!/bin/bash
+  set -euo pipefail
+  tag=$(curl -fsSL https://api.github.com/repos/juju/juju/releases/latest | jq -r .tag_name)
+  version=${tag#v}
+  [[ $version == 4.* ]]
+  sed -i "s/^JUJU_VERSION = .*/JUJU_VERSION = \"$version\"/" src/jjx/_version.py
+  echo "Set JUJU_VERSION to $version"
 
 [private]
 charms:
@@ -62,7 +72,10 @@ pre-release:
   @echo '2. `just pebble`. If `PEBBLE_VERSION` changed:'
   @echo '  a. `just functional`'
   @echo '  b. `git commit -am "bump Pebble"`'
-  @echo '3. `just charms`. If any files changed:'
+  @echo '3. `just juju`. If `JUJU_VERSION` changed:'
+  @echo '  a. `just functional`'
+  @echo '  b. `git commit -am "bump Juju version"`'
+  @echo '4. `just charms`. If any files changed:'
   @echo '  a. `just functional`'
   @echo '  b. `git commit -am "refresh charms"`'
 
