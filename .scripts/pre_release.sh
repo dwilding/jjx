@@ -29,9 +29,8 @@ if ! git diff --quiet -- src/jjx/_version.py; then
 fi
 
 # Juju
-tag=$(curl -fsSL https://api.github.com/repos/juju/juju/releases/latest | jq -r .tag_name)
-version=${tag#v}
-[[ $version == 4.* ]]
+# Use the snap channel because GitHub sometimes has 3.6.x as the "latest" release.
+version=$(snap info juju | awk '/^  4\/stable:/ {print $2}')
 sed -i "s/^JUJU_VERSION = .*/JUJU_VERSION = \"$version\"/" src/jjx/_version.py
 if ! git diff --quiet -- src/jjx/_version.py; then
   just functional
