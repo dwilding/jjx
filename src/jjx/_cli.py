@@ -79,6 +79,8 @@ def run_juju_command(argv: list[str]) -> int:
         return _cmd_run.run(rest, model)
     if command == "switch":
         return _cmd_misc.switch(rest)
+    if command == "set-model-constraints":
+        return _cmd_misc.set_model_constraints(rest)
     if command == "version":
         return _cmd_misc.version(rest)
     if command == "show-model":
