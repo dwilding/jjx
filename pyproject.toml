@@ -1,6 +1,6 @@
 [project]
 name = "jjx"
-version = "0.4.2.dev0"
+version = "0.5.0"
 description = "A Juju-on-Docker test adapter for Kubernetes charms."
 authors = [
     { name = "Dave Wilding", email = "tech@dpw.me" },
