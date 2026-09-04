@@ -24,6 +24,16 @@ def switch(args: list[str]) -> int:
     return 0
 
 
+def set_model_constraints(args: list[str]) -> int:
+    """Execute the set-model-constraints command.
+
+    jjx is single-unit with no real scheduling constraints, so this is a
+    no-op that just succeeds. pytest-jubilant 2.3.0+ calls it during model
+    setup (via jubilant.Juju.model_constraints()).
+    """
+    return 0
+
+
 def version(args: list[str]) -> int:
     """Execute the version command."""
     # jubilant calls `juju version --format json --all` and parses the
