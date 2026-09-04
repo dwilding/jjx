@@ -407,14 +407,14 @@ def test_jjx_pytest_select(k8s_2_configurable):
         )
 
 
-def test_jjx_pytest_select_verbose(k8s_2_configurable):
+def test_jjx_pytest_quiet_overrides_verbose(k8s_2_configurable):
     command = [
         "uv",
         "run",
         "jjx",
         "-d",
         "--",
-        "-vv",
+        "-q",
     ]
     result = subprocess.run(
         command,
@@ -427,8 +427,8 @@ def test_jjx_pytest_select_verbose(k8s_2_configurable):
         assert result.returncode == 0, (
             f"jjx exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
-        # -vv makes pytest print each test node id with a PASSED/FAILED marker.
-        assert "test_charm.py::test_deploy" in result.stdout
+        # -q cancels the built-in -v.
+        assert "test_charm.py::test_deploy" not in result.stdout
         # TEARDOWN
         command = [
             "uv",

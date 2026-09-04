@@ -132,8 +132,8 @@ uvx jjx -- <pytest-args>
 For example:
 
 ```sh
-# Enable verbose logging, to show more detail about each test.
-uvx jjx -- -vv
+# Use the integration tests marked 'smoke'.
+uvx jjx -- -m smoke
 ```
 
 To automatically include extra pytest options, use a `[tool.jjx]` table in `pyproject.toml`. For example:
@@ -149,7 +149,7 @@ The `jjx` Python package provides a `juju` command that is partially compatible 
 
 ```sh
 touch placeholder.charm
-uv run --group integration --with jjx pytest tests/integration --no-juju-teardown
+uv run --group integration --with jjx pytest tests/integration --no-juju-teardown -v
 rm placeholder.charm
 ```
 

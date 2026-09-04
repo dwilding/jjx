@@ -24,7 +24,7 @@ Additional pytest arguments can be appended to `jjx`'s built-in defaults in the 
 
 ```toml
 [tool.jjx]
-pytest-extra-args = ["-v", "-k", "test_deploy"]
+pytest-extra-args = ["-k", "test_deploy"]
 ```
 
 Extra pytest arguments can also be passed on the command line after `--`:
@@ -35,7 +35,7 @@ jjx -d -- -vv -k test_deploy
 
 Arguments are assembled in this order:
 
-1. `jjx`'s built-in defaults (`tests/integration --no-juju-teardown`)
+1. `jjx`'s built-in defaults (`tests/integration --no-juju-teardown -v`)
 2. `pytest-extra-args` from `pyproject.toml`
 3. extra args from the command line (after `--`)
 
@@ -43,7 +43,7 @@ Command-line args come last so they take precedence over `pyproject.toml` — ma
 
 ## under the hood
 
-`jjx` invokes pytest via `uv run --group integration pytest tests/integration --no-juju-teardown [<pytest-extra-args>] [<cli-extra-args>]`. How `jjx` makes itself available to the inner `uv run` depends on how it was launched:
+`jjx` invokes pytest via `uv run --group integration pytest tests/integration --no-juju-teardown -v [<pytest-extra-args>] [<cli-extra-args>]`. How `jjx` makes itself available to the inner `uv run` depends on how it was launched:
 
 - **Charm venv** (user added `jjx` to their charm's dependencies and runs `uv run jjx`): `--python <venv>` — pin uv to the current interpreter so the charm's existing venv (which already has `jjx`) is reused.
 - **Local checkout** (developer running `uvx --with-editable <repo> jjx`): `--with-editable <path>` — install the same source into the inner venv.
@@ -162,7 +162,7 @@ The charm runner is a persistent Docker container that executes charm hooks.
 Exact sequence:
 
 1. user runs `jjx` (or `uv run jjx` if jjx is a charm dependency)
-2. `jjx` invokes `uv run --group integration pytest tests/integration --no-juju-teardown` (with launch-mode-appropriate args to make `juju` available — see "under the hood")
+2. `jjx` invokes `uv run --group integration pytest tests/integration --no-juju-teardown -v` (with launch-mode-appropriate args to make `juju` available — see "under the hood")
 3. `uv` prepares an environment with the charm's test dependencies
 4. `pytest` (via `jubilant`) invokes `juju ...` commands
 5. those commands execute `jjx`'s `juju` shim (from the charm venv, the inner venv, or the tool install, depending on launch mode)
