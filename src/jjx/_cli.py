@@ -230,7 +230,7 @@ def jjx_pytest_args(charm_root: Path, cli_extra_args: list[str] | None = None) -
     so they take precedence over ``[tool.jjx].pytest-extra-args``, matching the
     convention that command-line options override configuration file defaults.
     """
-    default_args = ["tests/integration", "--no-juju-teardown"]
+    default_args = ["tests/integration", "--no-juju-teardown", "-v"]
     cli_args = cli_extra_args or []
     pyproject = charm_root / "pyproject.toml"
     if not pyproject.exists():
