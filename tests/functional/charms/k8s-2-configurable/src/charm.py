@@ -93,14 +93,15 @@ class FastAPIDemoCharm(ops.CharmBase):
             logger.info("Unable to connect to Pebble: %s", e)
             self.unit.status = ops.MaintenanceStatus("Waiting for Pebble in workload container")
             return
-        for attempt in range(3):
+        # The workload may not be ready immediately after replan(), so try get_version() in a loop.
+        for attempt in range(3):  # In general, allow more attempts for a complex workload.
             if attempt:
-                time.sleep(1)
+                time.sleep(2**attempt)  # If not first attempt, retry with exponential back-off.
             try:
                 version = fastapi_demo.get_version(config.server_port)
                 break
             except urllib.error.URLError:
-                logger.info("Workload not yet available (attempt %d)", attempt + 1)
+                continue
         else:
             logger.error("The workload was not available within the expected time")
             raise RuntimeError("workload is not available")

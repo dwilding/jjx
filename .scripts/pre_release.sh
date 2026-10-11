@@ -39,15 +39,6 @@ if ! git diff --quiet -- src/jjx/_version.py; then
 "
 fi
 
-# Charms
-.scripts/refresh_charms.sh
-if ! git diff --quiet -- tests/functional/charms; then
-  just functional
-  git commit -am "refresh charms"
-  summary+="✅ Refreshed charms
-"
-fi
-
 # The end!
 if [[ -n $summary ]]; then
   echo
