@@ -14,7 +14,7 @@ __version__ = "0.5.1.dev0"
 # Pass JUJU_VERSION to charm code as the environment variable. Pass
 # juju_version_string() to jubilant in the ``juju version`` and
 # ``juju status`` JSON output.
-JUJU_VERSION = "4.0.14"
+JUJU_VERSION = "4.0.15"
 
 # Pinned Pebble version. Must be a canonical/pebble release tag. Juju builds
 # the Pebble binary it injects into containers from the github.com/canonical/pebble
