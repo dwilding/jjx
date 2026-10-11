@@ -121,7 +121,9 @@ The `.charm` file passed to deploy is a trigger only. `jjx` does not inspect or 
 - `./.jjx/prom-config-<app>/` (Prometheus config directory, bind-mounted into the Prometheus container)
 - `./.jjx/grafana-config-<app>/` (Grafana provisioning directory, bind-mounted into the Grafana container)
 
-`jjx` caches the Pebble binary at `~/.cache/jjx/pebble-bin-<version>`, where `<version>` is the Pebble release tag pinned in `jjx/_version.py`. The binary is downloaded from the canonical/pebble GitHub Release for that tag on first use. The cache is shared across projects and persists across model teardowns to enable reuse across multiple deployments. Bumping the pinned version before a jjx release causes a fresh download (the old versioned cache entry is left behind).
+`jjx` caches the Pebble binary at `~/.cache/jjx/pebble-bin-<version>`, where `<version>` is the Pebble release tag pinned in `jjx/_version.py`. The binary is downloaded from the canonical/pebble GitHub Release for that tag on first use. The cache is shared across projects and persists across model teardowns to enable reuse across multiple deployments. Bumping the pinned version causes a fresh download (the old versioned cache entry is left behind).
+
+The pinned Pebble version is not the latest Pebble release. Juju builds the Pebble binary it injects into containers from the `github.com/canonical/pebble` pin in its `go.mod`, so jjx pins the same version Juju pins at the `JUJU_VERSION` release tag. Charms under test then see the same Pebble API surface as under real Juju. A scheduled workflow (`.github/workflows/latest-juju.yaml`, weekly) checks the Snap Store's `4/stable` channel for a newer Juju, derives the matching Pebble pin, and opens a PR if the Juju version has moved.
 
 Notes on generated runtime files:
 
