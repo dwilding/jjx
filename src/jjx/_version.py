@@ -1,22 +1,27 @@
 __version__ = "0.5.1.dev0"
 
-# Pinned Pebble version. Must be a canonical/pebble release tag.
-PEBBLE_VERSION = "v1.32.1"
-
-# The Juju version jjx reports to charms and to jubilant. This is the version
-# the charm under test sees via JUJU_VERSION and that ``juju version`` returns
-# to jubilant. Bump this when targeting a newer Juju series.
+# The Juju version jjx reports to charms and to jubilant. The charm under test
+# sees it as the JUJU_VERSION environment variable, and ``juju version`` and
+# ``juju status`` return it to jubilant.
 #
-# The two consumers require different string formats:
-#   - jubilant's Version parser (``juju version --format json``) needs
-#     ``major.minor.patch-release-arch`` (e.g. ``4.0.14-jjx-amd64``); a bare
-#     ``4.0.14`` is rejected.
-#   - ops's JujuVersion parser (the JUJU_VERSION env var) accepts only
-#     ``major.minor[.patch]`` (e.g. ``4.0.14``); the ``-release-arch`` suffix
-#     is rejected.
-# Use JUJU_VERSION for the env var and juju_version_string() for the
-# ``juju version``/``juju status`` JSON output.
-JUJU_VERSION = "4.0.14"
+# The two consumers parse different formats:
+#   - ops parses the JUJU_VERSION environment variable and accepts only
+#     ``major.minor[.patch]`` (for example ``4.0.14``).
+#   - jubilant parses the ``juju version`` JSON output and requires the
+#     ``major.minor.patch-release-arch`` suffix (for example
+#     ``4.0.14-jjx-amd64``).
+#
+# Pass JUJU_VERSION to charm code as the environment variable. Pass
+# juju_version_string() to jubilant in the ``juju version`` and
+# ``juju status`` JSON output.
+JUJU_VERSION = "4.0.15"
+
+# Pinned Pebble version. Must be a canonical/pebble release tag. Juju builds
+# the Pebble binary it injects into containers from the github.com/canonical/pebble
+# pin in its go.mod, so this must match that pin at the JUJU_VERSION release
+# tag. The scheduled workflow (.github/workflows/latest-juju.yaml) keeps this
+# up to date.
+PEBBLE_VERSION = "v1.32.1"
 
 
 def _host_arch() -> str:

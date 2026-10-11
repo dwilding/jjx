@@ -2,7 +2,7 @@ name: Test golden charms (weekly)
 
 on:
   schedule:
-    - cron: "0 21 * * 1"
+    - cron: "0 21 * * 1"  # Tuesdays 05:00 UTC+8
 
 permissions: {}
 
