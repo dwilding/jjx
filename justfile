@@ -24,10 +24,6 @@ test args="tests/unit tests/functional":
   uv run pytest -vv {{args}}
 
 [private]
-charms:
-  .scripts/refresh_charms.sh
-
-[private]
 pre-release:
   .scripts/pre_release.sh
 
