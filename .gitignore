@@ -1,3 +1,4 @@
 __pycache__
 workflows.sarif
 .coverage
+.tmp
