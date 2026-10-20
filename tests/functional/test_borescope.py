@@ -6,6 +6,9 @@ import helpers_functional as helpers
 PACKAGE_DIR = pathlib.Path(__file__).parent.parent.parent
 BORESCOPE = [
     "uvx",
+    # CI pins UV_PYTHON=3.10, but borescope requires Python 3.11+.
+    "--python",
+    "3.11",
     "borescope",
     "--socket",
     ".jjx/socket",
