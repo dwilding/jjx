@@ -30,7 +30,7 @@ pytest-extra-args = ["-k", "test_deploy"]
 Extra pytest arguments can also be passed on the command line after `--`:
 
 ```
-jjx -d -- -vv -k test_deploy
+jjx -d -- -k test_deploy
 ```
 
 Arguments are assembled in this order:
