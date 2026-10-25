@@ -27,7 +27,7 @@ jobs:
           path: operator
       - name: Run httpbin-demo
         working-directory: operator/examples/httpbin-demo
-        run: uvx --with git+https://github.com/dwilding/jjx@main jjx -d -p 8000:80 -- -vv
+        run: uvx --with git+https://github.com/dwilding/jjx@main jjx -d -p 8000:80
       - name: Check workload
         run: curl --fail http://localhost:8000/
       - name: Tear down
@@ -78,7 +78,7 @@ jobs:
         run: uv add --group integration "jjx @ git+https://github.com/dwilding/jjx@main"
       - name: Run httpbin-demo
         working-directory: operator/examples/httpbin-demo
-        run: uv run jjx -d -p 8000:80 -- -vv
+        run: uv run jjx -d -p 8000:80
       - name: Check workload
         run: curl --fail http://localhost:8000/
       - name: Tear down
