@@ -14,7 +14,7 @@ from __future__ import annotations
 import dataclasses
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 # Type aliases for virtual charm functions.
@@ -136,4 +136,4 @@ def resolve_endpoint_url(info: dict[str, Any], default_port: int) -> str:
 
 def _now_iso() -> str:
     """Return current UTC timestamp in ISO format."""
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    return datetime.now(UTC).replace(microsecond=0).isoformat()

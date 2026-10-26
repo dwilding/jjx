@@ -4,13 +4,12 @@ import json
 import re
 import subprocess
 import urllib.request
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 # (PyPI name, requirement spec with {version} placeholder)
 RUNTIME = [
     ("pyyaml", "pyyaml=={version}"),
-    ("tomli", "tomli=={version} ; python_full_version < '3.11'"),
 ]
 DEV = [
     ("ruff", "ruff=={version}"),
@@ -22,7 +21,7 @@ DEV = [
 BUILD = ["uv_build"]
 WORKFLOWS = ["rust-just"]
 
-CUTOFF = datetime.now(timezone.utc) - timedelta(days=7)
+CUTOFF = datetime.now(UTC) - timedelta(days=7)
 
 
 def parse_version(version: str) -> tuple[int, ...] | None:
@@ -49,7 +48,7 @@ def latest_version(package: str) -> str:
         if parsed is None:
             continue  # prerelease or non-standard version
         upload_time = max(f["upload_time_iso_8601"] for f in files)
-        dt = datetime.fromisoformat(upload_time.replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(upload_time)
         if dt > CUTOFF:
             continue
         if best_version is None or parsed > best_version[0]:

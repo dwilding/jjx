@@ -19,5 +19,5 @@ jobs:
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
       - name: Run unit tests
         env:
-          UV_PYTHON: '3.10'
+          UV_PYTHON: '3.11'
         run: uvx --from rust-just@1.58.0 just unit
