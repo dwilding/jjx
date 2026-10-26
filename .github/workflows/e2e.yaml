@@ -75,7 +75,13 @@ jobs:
           path: operator
       - name: Add jjx to httpbin-demo
         working-directory: operator/examples/httpbin-demo
-        run: uv add --group integration "jjx @ git+https://github.com/dwilding/jjx@main"
+        run: |
+          if ! grep -q '^requires-python = ">=3.10"$' pyproject.toml; then
+            echo "httpbin-demo has dropped support for Python 3.10; you can simplify this step"
+            exit 1
+          fi
+          sed -i 's/^requires-python = .*/requires-python = ">=3.11"/' pyproject.toml
+          uv add --group integration "jjx @ git+https://github.com/dwilding/jjx@main"
       - name: Run httpbin-demo
         working-directory: operator/examples/httpbin-demo
         run: uv run jjx -d -p 8000:80
@@ -107,7 +113,13 @@ jobs:
           path: operator
       - name: Add jjx to httpbin-demo
         working-directory: operator/examples/httpbin-demo
-        run: uv add --group integration "jjx @ git+https://github.com/dwilding/jjx@main"
+        run: |
+          if ! grep -q '^requires-python = ">=3.10"$' pyproject.toml; then
+            echo "httpbin-demo has dropped support for Python 3.10; you can simplify this step"
+            exit 1
+          fi
+          sed -i 's/^requires-python = .*/requires-python = ">=3.11"/' pyproject.toml
+          uv add --group integration "jjx @ git+https://github.com/dwilding/jjx@main"
       - name: Test httpbin-demo
         working-directory: operator/examples/httpbin-demo
         run: |

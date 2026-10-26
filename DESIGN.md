@@ -45,7 +45,7 @@ Command-line args come last so they take precedence over `pyproject.toml` — ma
 
 `jjx` invokes pytest via `uv run --group integration pytest tests/integration --no-juju-teardown -v [<pytest-extra-args>] [<cli-extra-args>]`. How `jjx` makes itself available to the inner `uv run` depends on how it was launched:
 
-- **Charm venv** (user added `jjx` to their charm's dependencies and runs `uv run jjx`): `--python <venv>` — pin uv to the current interpreter so the charm's existing venv (which already has `jjx`) is reused.
+- **Charm venv** (user added `jjx` to their charm's dependencies and runs `uv run jjx`): `--python <venv>` — pin uv to the current interpreter so the charm's existing venv (which already has `jjx`) is reused. This mode requires the charm's `requires-python` to be within jjx's range: uv resolves across the charm's full `requires-python` range.
 - **Local checkout** (developer running `uvx --with-editable <repo> jjx`): `--with-editable <path>` — install the same source into the inner venv.
 - **Tool install** (user ran `uv tool install jjx`): no injection — the `juju` shim is already on `PATH` with a hardcoded shebang pointing at the tool's Python, which has the correct `jjx`. The inner `uv run` only needs the charm's integration dependencies.
 
