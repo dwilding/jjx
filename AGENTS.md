@@ -15,3 +15,5 @@ If you write GitHub workflows, make sure that `uv run zizmor .` always passes.
 Always keep your changes focused, direct, and free from overgeneralization.
 
 Always keep `DESIGN.md` current. Every aspect of the design must earn its place.
+
+If you commit your changes, the commit message should be a short, plain, present tense phrase that communicates the intent of your changes (not every detail). Don't include a conventional-commit prefix.
