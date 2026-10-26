@@ -1,4 +1,6 @@
-name: Check deps
+# Guards against merging a lockfile that's misaligned with pyproject.toml.
+# Other workflows update the lockfile automatically instead of requiring alignment.
+name: Check Python deps
 
 on:
   pull_request:

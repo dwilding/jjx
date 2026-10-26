@@ -24,9 +24,5 @@ test args="tests/unit tests/functional":
   uv run pytest -vv {{args}}
 
 [private]
-pre-release:
-  .scripts/pre_release.sh
-
-[private]
 clean-docker:
   docker ps --all --quiet | xargs --no-run-if-empty docker rm --force

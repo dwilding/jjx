@@ -1,0 +1,60 @@
+name: Bump package and dependencies
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "New package version (x.y.z)"
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          enable-cache: false  # Avoid cache poisoning.
+      - name: Bump package version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: uv run --script .github/scripts/bump_version.py "$VERSION"
+      - name: Commit package bump
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          git checkout -b "bump-to-$VERSION"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -am "bump package to $VERSION"
+      - name: Bump dependency versions
+        run: uv run --script .github/scripts/bump_deps.py
+      - name: Commit dependency bumps
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            exit 0
+          fi
+          git commit -am "bump deps"
+      - name: Open a PR
+        env:
+          VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push --force origin "bump-to-$VERSION"
+          gh pr create --base main --head "bump-to-$VERSION" \
+            --title "chore: bump package to $VERSION" \
+            --body "" \
+            --reviewer dwilding
