@@ -1,0 +1,4 @@
+{
+  "all": ["feat!", "fix!", "revert!", "feat", "fix", "revert", "perf", "docs", "refactor", "test", "ci", "chore"],
+  "release": ["feat!", "fix!", "revert!", "feat", "fix", "revert", "perf", "docs"]
+}

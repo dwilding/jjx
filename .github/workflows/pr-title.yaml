@@ -1,0 +1,28 @@
+name: Check PR title
+
+on:
+  pull_request:
+    types:
+      - opened
+      - edited
+
+permissions: {}
+
+jobs:
+  pr-title:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check PR title
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+          types="$(jq -r '.all | join(", ")' .github/pr-types.json)"
+          pattern="^(${types//, /|}): "
+          if [[ ! "$TITLE" =~ $pattern ]]; then
+            echo "PR title must start with one of: ${types}." >&2
+            exit 1
+          fi

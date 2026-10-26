@@ -1,19 +1,20 @@
 name: Publish
 
 on:
-  push:
-    tags:
-      - "[0-9]+.*"
+  release:
+    types:
+      - published
 
-permissions:
-  id-token: write
-  attestations: write
-  contents: read
+permissions: {}
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     environment: publish-jjx
+    permissions:
+      id-token: write
+      attestations: write
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -21,7 +22,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
         with:
-          enable-cache: false  # Avoid cache poisoning when publishing.
+          enable-cache: false  # Avoid cache poisoning.
       - name: Build package
         run: uv build
       - name: Attest package provenance
@@ -30,3 +31,38 @@ jobs:
           subject-path: "dist/*"
       - name: Publish package
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # v1.14.2
+
+  start-next-dev:
+    runs-on: ubuntu-latest
+    needs: publish
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          enable-cache: false  # Avoid cache poisoning.
+      - name: Bump package version
+        run: |
+          new="$(uv version --bump patch --bump dev=0 --short --no-sync)"
+          sed -i "s/^__version__ = \".*\"/__version__ = \"$new\"/" src/jjx/_version.py
+      - name: Open a PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          version="$(uv version --short)"
+          git checkout -b "bump-to-$version"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -am "bump package to $version"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push --force origin "bump-to-$version"
+          gh pr create --base main --head "bump-to-$version" \
+            --title "chore: bump package to $version" \
+            --body "" \
+            --reviewer dwilding
