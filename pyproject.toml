@@ -7,10 +7,9 @@ authors = [
 ]
 license = "MIT"
 license-files = ["LICENSE"]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "pyyaml==6.0.3",
-    "tomli==2.4.1 ; python_full_version < '3.11'",
 ]
 
 [project.scripts]

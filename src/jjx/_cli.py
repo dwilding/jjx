@@ -7,12 +7,8 @@ import re
 import signal
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
-
-if sys.version_info >= (3, 11):
-    import tomllib
-else:
-    import tomli as tomllib  # ty: ignore[unresolved-import]
 
 from . import (
     _cmd_add_model,
