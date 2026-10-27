@@ -20,4 +20,4 @@ jobs:
       - name: Run unit tests
         env:
           UV_PYTHON: '3.11'
-        run: uvx --from rust-just@1.58.0 just unit
+        run: uvx --from rust-just@1.59.0 just unit
