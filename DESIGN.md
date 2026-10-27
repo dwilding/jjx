@@ -53,6 +53,17 @@ The test fixture only needs a `.charm` file to exist; `jjx` creates one automati
 
 No project dependency changes are required. `jjx` injects itself (or relies on the tool-installed `juju` shim) and assumes the project already provides its normal test dependencies.
 
+## interrupt choreography
+
+The pytest tree runs in its own session, so a terminal Ctrl-C reaches `jjx` alone:
+
+1. `jjx` records the press without raising. Launchers such as uvx relay a duplicate back within milliseconds. Only a press at least a quarter-second later counts as a second one.
+2. `jjx` SIGKILLs the `uv` wrapper, which would otherwise forward a second interrupt to pytest and never exit on its own.
+3. `jjx` relays one SIGINT to the tree and waits up to 60 seconds for it to exit. pytest prints its report and runs fixture teardown, which for a failed session includes pytest-jubilant's model debug-log dump.
+4. Only after the tree has exited does `jjx` destroy the models, so the debug-log dump always finds them. A blank line separates the teardown output from the test report. It exits 130, the standard Ctrl-C code.
+
+A second Ctrl-C, or closing the terminal, SIGKILLs the tree immediately instead of waiting. A relayed interrupt also reaches any in-flight `juju` shim call, which exits 130 rather than printing a traceback.
+
 ## scope
 
 Supported:

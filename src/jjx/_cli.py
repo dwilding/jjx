@@ -7,8 +7,10 @@ import re
 import signal
 import subprocess
 import sys
+import time
 import tomllib
 from pathlib import Path
+from types import FrameType
 
 from . import (
     _cmd_add_model,
@@ -107,6 +109,10 @@ def juju_dispatch(argv: list[str]) -> int:
         if exc.message:
             sys.stderr.write(exc.message + "\n")
         return exc.exit_code
+    except KeyboardInterrupt:
+        # Ctrl-C tears the jjx session down, and the relayed SIGINT reaches any
+        # in-flight `juju` shim call. Exit quietly with the standard code.
+        return 130  # Standard exit code for SIGINT
 
 
 def run_hook_tool(tool: str, args: list[str]) -> int:
@@ -273,6 +279,131 @@ def _has_pytest_jubilant(charm_root: Path) -> bool:
     return result.returncode == 0
 
 
+_INTERRUPT_GRACE_SECONDS = 60.0
+
+
+def _group_alive(pgid: int) -> bool:
+    """Return whether any process still exists in the given process group."""
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def _killpg_safe(pgid: int, sig: int) -> None:
+    """Send a signal to a process group, tolerating its death between calls."""
+    try:
+        os.killpg(pgid, sig)
+    except ProcessLookupError:
+        pass
+
+
+def _wait_group_gone(pgid: int, received: list[tuple[int, float]], grace: float) -> None:
+    """Block until no processes remain in the group, SIGKILLing after the grace period.
+
+    A further Ctrl-C arriving more than a quarter-second after the first also
+    escalates to SIGKILL. Launchers such as uvx relay their own duplicate copy
+    of each SIGINT jjx receives; those land within milliseconds and must not
+    count as a second press. Once SIGKILLed, a few more seconds are allowed
+    for stragglers stuck in uninterruptible sleep, then the wait is abandoned
+    so teardown can still proceed.
+    """
+    first_time = received[0][1]
+    deadline = first_time + grace
+    while _group_alive(pgid):
+        last_time = received[-1][1]
+        if last_time - first_time > 0.25 or time.monotonic() >= deadline:
+            _killpg_safe(pgid, signal.SIGKILL)
+        if time.monotonic() >= deadline + 5:
+            break
+        time.sleep(0.2)
+
+
+def _pause_until_signalled() -> None:
+    """Sit at the 'Press Ctrl-C' prompt until SIGINT or SIGHUP arrives.
+
+    Never raises: just like in the test phase, launchers such as uvx relay a
+    duplicate of the interrupt back to jjx within milliseconds, and that
+    must not tear the teardown logic of the caller apart with an unexpected
+    KeyboardInterrupt. If teardown is interrupted deliberately with a second
+    press a quarter-second or more later, SIGINT propagates normally again
+    once the caller's exception handlers are gone; the standard handler is
+    restored before returning.
+    """
+    received: list[tuple[int, float]] = []
+
+    def count(signum: int, frame: FrameType | None) -> None:
+        received.append((signum, time.monotonic()))
+
+    priors = [(sig, signal.signal(sig, count)) for sig in (signal.SIGINT, signal.SIGHUP)]
+    try:
+        while not received:
+            signal.pause()
+    finally:
+        for sig, prior in priors:
+            signal.signal(sig, prior)
+
+
+def _run_pytest_session(cmd: list[str], env: dict[str, str]) -> tuple[int, bool]:
+    """Run pytest in its own session and relay interrupts, waiting for exit.
+
+    Returns ``(returncode, interrupted)``. The test tree runs in its own
+    session so a terminal Ctrl-C reaches jjx only; jjx decides what reaches
+    pytest. On SIGINT it kills `uv` (which would relay a second SIGINT and
+    abort pytest's graceful shutdown) and forwards one SIGINT to the tree,
+    then waits for the tree to finish before returning, so model teardown
+    cannot race the debug-log dump pytest-jubilant does at the end of a
+    failing session. SIGHUP instead SIGKILLs the tree: with the terminal
+    gone there is no output left to preserve.
+    """
+    received: list[tuple[int, float]] = []
+
+    def count(signum: int, frame: FrameType | None) -> None:
+        received.append((signum, time.monotonic()))
+
+    # Never raises: uvx relays a duplicate of jjx's SIGINT back to it. Installed
+    # before Popen so there is no window where an interrupt escapes handling.
+    priors = [(sig, signal.signal(sig, count)) for sig in (signal.SIGINT, signal.SIGHUP)]
+
+    try:
+        proc = subprocess.Popen(cmd, env=env, start_new_session=True)
+        # start_new_session: the child leads its own session and group, so its
+        # pgid is its pid and terminal Ctrl-C never reaches the test tree.
+        pgid = proc.pid
+    except BaseException:
+        for sig, prior in priors:
+            signal.signal(sig, prior)
+        raise
+
+    try:
+        while True:
+            try:
+                returncode = proc.wait(timeout=0.2)
+                break
+            except subprocess.TimeoutExpired:
+                if not received:
+                    continue
+                if received[0][0] != signal.SIGHUP:
+                    print(flush=True)  # move off the terminal's "^C" line
+                proc.kill()  # then reap: a zombie uv keeps the group alive
+                proc.wait()
+                if received[0][0] == signal.SIGHUP:
+                    _killpg_safe(pgid, signal.SIGKILL)
+                    _wait_group_gone(pgid, received, grace=1.0)
+                else:
+                    _killpg_safe(pgid, signal.SIGINT)
+                    _wait_group_gone(pgid, received, _INTERRUPT_GRACE_SECONDS)
+                returncode = proc.returncode
+                break
+        if received:
+            returncode = 130
+        return returncode, bool(received)
+    finally:
+        for sig, prior in priors:
+            signal.signal(sig, prior)
+
+
 def jjx_cli() -> int:
     """Run the `jjx` CLI and return an exit code.
 
@@ -329,6 +460,9 @@ def jjx_cli() -> int:
         if exc.message:
             sys.stderr.write(exc.message + "\n")
         return exc.exit_code
+    except KeyboardInterrupt:
+        # Ctrl-C during preflight: nothing has been created yet.
+        return 130  # Standard exit code for SIGINT
 
     placeholder_charm = charm_root / "placeholder.charm"
     placeholder_charm.touch()
@@ -354,12 +488,19 @@ def jjx_cli() -> int:
     ]
 
     try:
-        proc = subprocess.run(cmd, env=env, check=False)
+        returncode, interrupted = _run_pytest_session(cmd, env)
+        # The placeholder charm has done its job as soon as the run is over.
         placeholder_charm.unlink()
+        if interrupted:
+            # The test tree was interrupted: tear models down before jjx exits.
+            print()  # separate the teardown output from the interrupt report
+            teardown_all_models()
+            return 130  # Standard exit code for SIGINT
         container = _engine._running_workload_container()
         if container is None:
+            print()  # separate the teardown output from the test report
             teardown_all_models()
-            return proc.returncode
+            return returncode
         if publish:
             workload_line = f"Workload running at 127.0.0.1:{external_port}"
         else:
@@ -374,12 +515,20 @@ def jjx_cli() -> int:
                 print(line, flush=True)
         if detach:
             print("\nRun 'jjx down' to tear down")
-            return proc.returncode
+            return returncode
         print("\nPress Ctrl-C to tear down", flush=True)
-        signal.pause()
-        return proc.returncode
-    except KeyboardInterrupt:
-        # Destroy all models on Ctrl+C
+        _pause_until_signalled()
         print()
         teardown_all_models()
         return 130  # Standard exit code for SIGINT
+    except KeyboardInterrupt:
+        # Destroy all models on Ctrl+C racing the pytest tree's return: a ^C
+        # can arrive while the final prints are going out, before the pause.
+        # The pytest and pause phases use non-raising handlers, so a press
+        # landing during either is handled by that phase's own choreography.
+        teardown_all_models()
+        return 130  # Standard exit code for SIGINT
+    finally:
+        # Safety net: remove the placeholder even when the run ends by
+        # exception, so no stray .charm file is ever left behind.
+        placeholder_charm.unlink(missing_ok=True)
