@@ -1,4 +1,4 @@
-__version__ = "0.6.0"
+__version__ = "0.6.1.dev0"
 
 # The Juju version jjx reports to charms and to jubilant. The charm under test
 # sees it as the JUJU_VERSION environment variable, and ``juju version`` and
