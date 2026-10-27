@@ -127,3 +127,90 @@ def test_ctrl_c_tears_down(k8s_2_configurable):
     ]
     assert not leftover
     assert not (k8s_2_configurable / ".jjx").exists()
+
+
+def test_ctrl_c_waits_for_pending_teardown(k8s_2_configurable):
+    # Start with a failing test, so that pytest-jubilant dumps the model debug-log.
+    fail_test = k8s_2_configurable / "tests" / "integration" / "test_0_aaa_fail.py"
+    fail_test.write_text("def test_fails():\n    assert False\n")
+    try:
+        # Run jjx in its own process group so SIGINT reaches the whole group.
+        command = [
+            "uvx",
+            "--with-editable",
+            PACKAGE_DIR,
+            "jjx",
+        ]
+        proc = subprocess.Popen(
+            command,
+            cwd=k8s_2_configurable,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            start_new_session=True,
+        )
+        # Wait for deploy to start, then interrupt it mid-flight.
+        runtime = jjx.container_runtime()
+        deadline = time.monotonic() + 180.0
+        while time.monotonic() < deadline:
+            command = [
+                runtime,
+                "ps",
+                "--all",
+                "--format",
+                "{{.Names}}",
+            ]
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if any(
+                n.strip().startswith(("jubilant-", "jjx-default-", "jjx-layer-copy-"))
+                for n in result.stdout.splitlines()
+            ):
+                break
+            time.sleep(0.2)
+        else:
+            raise AssertionError("jjx did not start any container within 180s")
+        os.killpg(os.getpgid(proc.pid), signal.SIGINT)
+        try:
+            output = proc.communicate(timeout=120.0)[0]
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.communicate()
+            raise AssertionError("jjx did not exit within 120s of SIGINT")
+        # jjx must exit with the standard Ctrl-C code.
+        assert proc.returncode == 130
+        # pytest-jubilant dumped the model debug-log while the model still
+        # existed. If teardown had won the race, juju would have printed an
+        # error about a missing model.
+        assert "does not exist" not in output
+        # TEARDOWN
+        command = [
+            runtime,
+            "ps",
+            "--all",
+            "--format",
+            "{{.Names}}",
+        ]
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        leftover = [
+            n
+            for n in result.stdout.splitlines()
+            if n.strip().startswith(("jubilant-", "jjx-default-", "jjx-layer-copy-"))
+        ]
+        assert not leftover
+        assert not (k8s_2_configurable / ".jjx").exists()
+    finally:
+        # Safety net for jjx (Popen): kill the process if it's still running.
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate()
+        fail_test.unlink(missing_ok=True)
