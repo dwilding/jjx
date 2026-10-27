@@ -40,15 +40,22 @@ def _docker_exec(container_name: str, command: list[str], timeout: float = 30.0)
 
 
 def _wait_for_postgres(container_name: str, timeout: float = 60.0) -> None:
-    """Wait until postgres is fully ready to accept connections.
+    """Wait until the real postgres server is accepting TCP connections.
 
     The postgres Docker entrypoint starts a temporary server to perform
     initialisation (creating users, databases, etc.), then shuts it down
-    and starts the real server. ``pg_isready`` can report "accepting
-    connections" during the temporary-server phase, but ``psql`` will fail
-    with "the database system is shutting down" if we try to use it then.
-    To avoid this race, we wait until we can run a query against the
-    ``postgres`` maintenance database (which always exists).
+    and starts the real server. The temporary server only listens on the
+    Unix socket (``listen_addresses=''``), so a socket-based probe like
+    ``psql`` can succeed against it — only for the socket file to vanish
+    moments later when the temporary server is stopped, leaving a window
+    in which psql fails with "connection to server on socket ... No such
+    file or directory".
+
+    Probing over TCP closes that window: the temporary server cannot
+    accept TCP connections, so a successful probe means the entrypoint
+    has handed over to the real server, which accepts TCP and Unix socket
+    connections alike. This also matches how the charm connects to
+    postgres: over TCP, using the container's IP address.
     """
     deadline = time.monotonic() + timeout
     last_error = ""
@@ -56,7 +63,7 @@ def _wait_for_postgres(container_name: str, timeout: float = 60.0) -> None:
         try:
             _docker_exec(
                 container_name,
-                ["psql", "-U", "postgres", "-d", "postgres", "-c", "SELECT 1"],
+                ["psql", "-h", "127.0.0.1", "-U", "postgres", "-d", "postgres", "-c", "SELECT 1"],
                 timeout=5.0,
             )
             return
