@@ -225,6 +225,7 @@ def test_charm_user_root_rejected_by_cli_preflight(charm_dir):
         f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
     assert "Error: charm-user 'root' is not supported" in result.stderr
+    assert "jjx expects rootless charm code" in result.stderr
     # No test session ran, so no state was created.
     assert "--juju-model " not in result.stdout
     assert not (charm_dir / ".jjx").exists()
@@ -243,7 +244,9 @@ def test_charm_user_unset_warns_and_runs_170(charm_dir):
             f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
         assert "Warning: charm-user is not set" in result.stderr
-        assert "charm-user: non-root" in result.stderr
+        assert "jjx expects rootless charm code" in result.stderr
+        # The warning ends with a blank line before pytest's output starts.
+        assert "Set 'charm-user: non-root' in charmcraft.yaml.\n\n" in result.stderr
         # pytest-jubilant names its model jubilant-<hex>-test-charm, so the
         # charm runner is named after that model. Parse the model from the
         # hint jjx prints after the test session.

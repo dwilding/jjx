@@ -444,16 +444,15 @@ def jjx_cli() -> int:
         charm_user = _cmd_deploy.read_charm_user(charm_root)
         if charm_user is not None and charm_user != "non-root":
             sys.stderr.write(
-                f"Error: charm-user {charm_user!r} is not supported by jjx. jjx only runs "
-                "charm code as non-root (user 170). Set `charm-user: non-root` in "
-                "charmcraft.yaml.\n"
+                f"Error: charm-user {charm_user!r} is not supported. jjx expects rootless "
+                "charm code. Set 'charm-user: non-root' in charmcraft.yaml.\n"
             )
             return 1
         if charm_user is None:
+            # The blank line separates the warning from the pytest banner.
             sys.stderr.write(
-                "Warning: charm-user is not set in charmcraft.yaml. jjx runs charm "
-                "code as non-root (user 170). Set `charm-user: non-root` in "
-                "charmcraft.yaml to match jjx's behavior.\n"
+                "Warning: charm-user is not set. jjx expects rootless charm code. Set "
+                "'charm-user: non-root' in charmcraft.yaml.\n\n"
             )
             sys.stderr.flush()
 

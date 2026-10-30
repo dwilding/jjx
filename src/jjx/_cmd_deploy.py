@@ -219,8 +219,8 @@ def _check_charm_user(charm_source: Path) -> None:
     charm_user = read_charm_user(charm_source)
     if charm_user != "non-root" and charm_user is not None:
         raise _engine.CliError(
-            f"Error: charm-user {charm_user!r} is not supported by jjx. jjx only runs charm "
-            "code as non-root (user 170). Set `charm-user: non-root` in charmcraft.yaml."
+            f"Error: charm-user {charm_user!r} is not supported. jjx expects rootless "
+            "charm code. Set 'charm-user: non-root' in charmcraft.yaml."
         )
 
 
