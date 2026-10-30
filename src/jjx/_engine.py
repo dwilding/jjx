@@ -191,8 +191,9 @@ def _write_pebble_identity(jjx_dir: Path) -> Path:
     runs as the image's declared user (or root) — so without the 170 identity the
     charm's Container.push/replan/add-layer calls would be read-only. The host
     identity keeps host-side tools (borescope against .jjx/socket) working for
-    any workload user: before jjx ran the daemon as the host user, which gave
-    those tools admin implicitly.
+    any workload user, and grants nothing the host user doesn't already have:
+    they control the containers, so the socket was never a boundary against
+    them.
     """
     pebble_dir = jjx_dir / "pebble"
     pebble_dir.mkdir(parents=True, exist_ok=True)
