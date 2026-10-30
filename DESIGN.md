@@ -221,7 +221,7 @@ Exact sequence:
 Deploy flow:
 
 1. ensure `./.jjx` exists and load state
-2. stage runtime charm files in `./.jjx/charm/` (`src/`, `metadata.yaml`, `config.yaml`)
+2. stage runtime charm files in `./.jjx/charm/` (`src/`, `metadata.yaml`, `config.yaml`) — `charm-user` is staged into `metadata.yaml` (where ops reads it), defaulting to `non-root` when charmcraft.yaml leaves it unset
 3. gate on `charm-user` from charmcraft.yaml (see "container users" above): the `jjx` CLI has already rejected `root`/`sudoer` at preflight; deploy re-checks as a backstop for direct shim use, and the unset warning has already printed at preflight too.
 4. pre-pull the workload image with retry (see "image pull retries" below), then start workload container and Pebble with explicit `--network bridge` (no host networking)
    - Pebble is started with `run --hold --create-dirs --identities /jjx/pebble/identities.yaml` so baked-in layers (e.g. Rockcraft layers with `startup: enabled`) do not autostart services before the charm's pebble-ready hook fires — matching real Juju, which also uses `--hold`. The identities file grants UID 170 admin access (see "container users" above).

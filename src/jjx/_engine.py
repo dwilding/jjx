@@ -156,9 +156,10 @@ def _prepare_shared_dirs(workload_name: str | None = None) -> None:
 
     With a workload name, also pre-create the charm runner's socket directory
     (charm/containers/<workload>). The pebble-ready subprocess creates it inside
-    the container otherwise, where the runner's umask leaves it 755 and owned by
-    UID 170 — a directory the host cannot delete, so teardown of .jjx fails.
-    Deploy's host-side precreation sidesteps that entirely.
+    the container otherwise, where the runner's umask leaves it 0755 and owned
+    by UID 170 — permissions the host cannot relax, so later chmod-based setup
+    and cleanup on it fail. Deploy's host-side precreation sidesteps that: the
+    directory stays owned (and re-chmoddable) by the host.
     """
     modes = {
         _jjx_dir(): 0o775,
@@ -174,8 +175,9 @@ def _prepare_shared_dirs(workload_name: str | None = None) -> None:
                 os.chmod(path, mode)
             except OSError:
                 # An earlier container run may have left the directory owned by
-                # UID 170; the host cannot chmod it. Teardown will fall back to
-                # `sudo rm -rf .jjx` (see DESIGN.md).
+                # UID 170; the host cannot chmod it. Group write on the parents
+                # still lets teardown delete it (rmtree needs no ownership of
+                # what it removes under a writable parent).
                 pass
 
 
