@@ -120,14 +120,14 @@ The `.charm` file passed to deploy is a trigger only. `jjx` does not inspect or 
 
 ## container users
 
-The charm runner always runs as `170:170`. jjx never runs charm code as root. What the charm declares determines only whether jjx prints a warning:
+The charm runner always runs as `170:170`. jjx never runs charm code as root. What the charm declares determines whether jjx warns or refuses to run:
 
-| `charm-user` declaration | Charm runner | Warning |
+| `charm-user` declaration | Charm runner | jjx behavior |
 |---|---|---|
-| `non-root` | `170:170` | no |
-| unset | `170:170` | yes |
-| `root` | deploy fails | — |
-| `sudoer` | deploy fails | — |
+| `non-root` | `170:170` | silent |
+| unset | `170:170` | warning |
+| `root` | — | jjx refuses to run |
+| `sudoer` | — | jjx refuses to run |
 
 Workload containers follow their own declarations, with no dependence on the charm-runner rules:
 
@@ -142,7 +142,7 @@ This diverges from real Juju, which runs charm code as root when `charm-user` is
 
 Virtual charms are exempt: they have no charmcraft.yaml and no charm code, so the gate never runs.
 
-The unset warning is printed by the `jjx` CLI at preflight, before pytest starts. Deploy re-checks `charm-user` (for `root`/`sudoer` rejects) but does not warn, because under `jjx` the deploy subprocess runs inside the pytest tree, whose stderr capture would hide the warning from the user.
+The `jjx` CLI enforces the gate at preflight, before pytest starts: `root`/`sudoer` fail with a clean error, and unset prints the warning. Deploy re-checks as a backstop for direct shim use, but its message would otherwise be lost — under `jjx` the deploy subprocess runs inside the pytest tree, whose stderr capture turns a deploy-time failure into tracebacks from every test instead of one clean error.
 
 Two mechanisms make the 170 runner work. First, Pebble's socket grants write access only to the daemon's own UID, root, or a seeded identity, so deploy passes `pebble run --identities` a file granting UID 170 admin access; without it the charm's Pebble writes are silently read-only. The file also grants the host user admin access. Host-side tools over `.jjx/socket` need it (borescope's `ps`, for example, uses the admin-only files API), and it grants nothing the host user doesn't already have: they create and destroy the containers and can `docker exec` into them, so the socket was never a boundary against them. Second, UID 170 owns nothing on the host, so the shared state directories under `.jjx/` are group-writable and both containers run with the host group added, letting the runner and the workload's Pebble daemon write files the host can still read and remove.
 
@@ -220,7 +220,7 @@ Deploy flow:
 
 1. ensure `./.jjx` exists and load state
 2. stage runtime charm files in `./.jjx/charm/` (`src/`, `metadata.yaml`, `config.yaml`)
-3. gate on `charm-user` from charmcraft.yaml (see "container users" above): `root`/`sudoer` fail the deploy. The unset warning has already printed at `jjx` preflight.
+3. gate on `charm-user` from charmcraft.yaml (see "container users" above): the `jjx` CLI has already rejected `root`/`sudoer` at preflight; deploy re-checks as a backstop for direct shim use, and the unset warning has already printed at preflight too.
 4. pre-pull the workload image with retry (see "image pull retries" below), then start workload container and Pebble with explicit `--network bridge` (no host networking)
    - Pebble is started with `run --hold --create-dirs --identities /jjx/pebble/identities.yaml` so baked-in layers (e.g. Rockcraft layers with `startup: enabled`) do not autostart services before the charm's pebble-ready hook fires — matching real Juju, which also uses `--hold`. The identities file grants UID 170 admin access (see "container users" above).
    - the workload container runs with `--user <uid>:<gid>` when the charm declares them, otherwise at the image's declared user, or root if the image declares none

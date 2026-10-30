@@ -128,6 +128,26 @@ def remove_app(charm_dir: pathlib.Path) -> None:
     )
 
 
+def run_jjx(charm_dir: pathlib.Path, *args: str) -> subprocess.CompletedProcess[str]:
+    # Run the full jjx CLI the way a user does. Detach (-d) so jjx exits after
+    # the run instead of waiting for Ctrl-C.
+    command = [
+        "uvx",
+        "--with-editable",
+        PACKAGE_DIR,
+        "jjx",
+        "-d",
+        *args,
+    ]
+    return subprocess.run(
+        command,
+        cwd=charm_dir,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
 def jjx_down(charm_dir: pathlib.Path) -> subprocess.CompletedProcess[str]:
     command = [
         "uvx",
@@ -194,29 +214,29 @@ def test_charm_user_sudoer_fails(charm_dir):
     helpers.assert_no_container(CHARM_RUNNER_NAME)
 
 
+def test_charm_user_root_rejected_by_cli_preflight(charm_dir):
+    # Change the declaration to root.
+    set_charm_user(charm_dir, "root")
+    # Run the full jjx CLI. Preflight rejects 'root' before pytest starts,
+    # so the user sees one clean error instead of deploy-time tracebacks.
+    result = run_jjx(charm_dir)
+    assert result.returncode == 1, (
+        f"jjx exited with code {result.returncode}\n"
+        f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    )
+    assert "ERROR: charm-user 'root' is not supported" in result.stderr
+    # No test session ran, so no state was created.
+    assert "--juju-model " not in result.stdout
+    assert not (charm_dir / ".jjx").exists()
+    assert not (charm_dir / "placeholder.charm").exists()
+
+
 def test_charm_user_unset_warns_and_runs_170(charm_dir):
     # Remove the declaration.
     remove_charm_user(charm_dir)
     # Run the full jjx CLI. The warning prints at preflight, on stderr, where
     # pytest's capture of the deploy subprocess would otherwise hide it.
-    # Detach (-d) so jjx exits after the run instead of waiting for Ctrl-C.
-    command = [
-        "uvx",
-        "--with-editable",
-        PACKAGE_DIR,
-        "jjx",
-        "-d",
-        "--",
-        "-k",
-        "test_deploy",
-    ]
-    result = subprocess.run(
-        command,
-        cwd=charm_dir,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    result = run_jjx(charm_dir, "--", "-k", "test_deploy")
     try:
         assert result.returncode == 0, (
             f"jjx exited with code {result.returncode}\n"

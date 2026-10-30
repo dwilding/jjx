@@ -436,17 +436,26 @@ def jjx_cli() -> int:
         return exc.exit_code
 
     charm_root = _engine._project_root()
-    # Preflight: warn about an unset charm-user here, where the user sees it.
-    # Deploy checks charm-user when the test harness invokes the juju shim,
-    # but its stderr is captured by pytest, so only the CLI's preflight
-    # warning reaches the terminal.
-    if (charm_root / "charmcraft.yaml").exists() and _cmd_deploy.charm_user_unset(charm_root):
-        sys.stderr.write(
-            "warning: charm-user is not set in charmcraft.yaml; jjx runs charm code as "
-            "non-root (user 170). Set `charm-user: non-root` in charmcraft.yaml to "
-            "match jjx's behavior.\n"
-        )
-        sys.stderr.flush()
+    # Preflight: gate on charm-user here, where the user sees it. Deploy
+    # re-checks when the test harness invokes the juju shim, but its stderr
+    # is captured by pytest, so only this preflight's message reaches the
+    # terminal. Rejecting root/sudoer here also means pytest never starts.
+    if (charm_root / "charmcraft.yaml").exists():
+        charm_user = _cmd_deploy.read_charm_user(charm_root)
+        if charm_user is not None and charm_user != "non-root":
+            sys.stderr.write(
+                f"ERROR: charm-user {charm_user!r} is not supported by jjx: jjx only runs "
+                "charm code as non-root (user 170). Set `charm-user: non-root` in "
+                "charmcraft.yaml.\n"
+            )
+            return 1
+        if charm_user is None:
+            sys.stderr.write(
+                "warning: charm-user is not set in charmcraft.yaml; jjx runs charm code as "
+                "non-root (user 170). Set `charm-user: non-root` in charmcraft.yaml to "
+                "match jjx's behavior.\n"
+            )
+            sys.stderr.flush()
 
     detach = "-d" in jjx_args
 

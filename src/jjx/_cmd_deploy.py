@@ -202,25 +202,22 @@ def _workload_user_arg(uid: int | None, gid: int | None) -> str | None:
     )
 
 
-def charm_user_unset(charm_source: Path) -> bool:
-    """Report whether charmcraft.yaml leaves charm-user unset."""
+def read_charm_user(charm_source: Path) -> str | None:
+    """Return the charm-user value charmcraft.yaml declares, if any."""
     data = _engine._read_yaml(charm_source / "charmcraft.yaml")
-    return data.get("charm-user") is None
+    return data.get("charm-user")
 
 
 def _check_charm_user(charm_source: Path) -> None:
     """Gate on charm-user from charmcraft.yaml.
 
     `non-root` and unset both deploy; anything else fails the deploy: jjx has no
-    code path that runs charm code as root. The unset warning is printed by the
-    `jjx` CLI, not here — under `jjx` this runs inside the pytest tree, whose
-    stderr capture hides a warning from the user.
+    code path that runs charm code as root. Under `jjx` this is a backstop — the
+    CLI's preflight rejects `root`/`sudoer` before pytest starts, so the user
+    sees one clean error instead of tracebacks from inside the test tree.
     """
-    data = _engine._read_yaml(charm_source / "charmcraft.yaml")
-    charm_user = data.get("charm-user")
-    if charm_user != "non-root":
-        if charm_user is None:
-            return
+    charm_user = read_charm_user(charm_source)
+    if charm_user != "non-root" and charm_user is not None:
         raise _engine.CliError(
             f"charm-user {charm_user!r} is not supported by jjx: jjx only runs charm code "
             "as non-root (user 170). Set `charm-user: non-root` in charmcraft.yaml."
