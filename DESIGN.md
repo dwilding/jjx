@@ -118,6 +118,32 @@ Charm code is executed from `./src/` inside a persistent Docker container (the "
 
 The `.charm` file passed to deploy is a trigger only. `jjx` does not inspect or extract it.
 
+## container users
+
+The charm runner always runs as `170:170`. jjx never runs charm code as root. What the charm declares determines only whether jjx prints a warning:
+
+| `charm-user` declaration | Charm runner | Warning |
+|---|---|---|
+| `non-root` | `170:170` | no |
+| unset | `170:170` | yes |
+| `root` | deploy fails | — |
+| `sudoer` | deploy fails | — |
+
+Workload containers follow their own declarations, with no dependence on the charm-runner rules:
+
+| Workload declaration (`uid:`/`gid:`) | Workload user |
+|---|---|
+| set | `--user <uid>:<gid>` |
+| not set | no `--user`; the image's declared user applies, or root if the image declares none |
+
+jjx follows any declared `uid`/`gid` value, with one guard: values in 1000–9999 are rejected at deploy, matching Juju's reserved range.
+
+This diverges from real Juju, which runs charm code as root when `charm-user` is unset and forces the workload to root in that case too. The divergence is deliberate: it catches, before the charm declares anything, any dependence on the legacy behavior — a dependence that would break on real Juju the moment the charm sets `charm-user: non-root`. jjx shows the charm its destination, not its legacy.
+
+Virtual charms are exempt: they have no charmcraft.yaml and no charm code, so the gate never runs.
+
+Two mechanisms make the 170 runner work. First, Pebble's socket grants write access only to the daemon's own UID, root, or a seeded identity, so deploy passes `pebble run --identities` a file granting UID 170 admin access; without it the charm's Pebble writes are silently read-only. Second, UID 170 owns nothing on the host, so the shared state directories under `.jjx/` are group-writable and both containers run with the host group added, letting the runner and the workload's Pebble daemon write files the host can still read and remove.
+
 ## filesystem contract
 
 `jjx` writes project-local state to `./.jjx/`:
@@ -139,6 +165,7 @@ The pinned Pebble version is not the latest Pebble release. Juju builds the Pebb
 Notes on generated runtime files:
 
 - Pebble runtime files are created inside the workload container under a jjx-managed state path: `./.jjx/pebble/` (mounted at `/jjx/pebble` in the container). Any baked-in Pebble layers from the OCI image (e.g. Rockcraft layers at `/var/lib/pebble/default/layers/`) are copied into this directory before Pebble starts, so service definitions like `startup: enabled` are preserved for charm layers using `override: merge`.
+- `./.jjx/pebble/identities.yaml` is written by deploy and passed to `pebble run --identities` at workload startup. It grants UID 170 (the charm runner) admin access to the Pebble API (see "container users" above).
 - `./.jjx/socket` is the Pebble API Unix socket. It is bind-mounted into the workload container (where Pebble creates it) and into the charm runner container (where charm code and hook tools connect to it).
 - `JJX_STATE_DIR` is set to `/jjx` (the in-container mount point of `.jjx/`) in the charm runner environment. Hook tools call back into `jjx` to read and write state; this env var lets them locate state directly.
 - `./.jjx/charm/.unit-state.db` is created by charm runtime state persistence (written by `ops` via `sqlite3` to `JUJU_CHARM_DIR/.unit-state.db`, which inside the charm runner is `/charm/.unit-state.db`).
@@ -153,6 +180,8 @@ The charm runner is a persistent Docker container that executes charm hooks.
 
 **Naming**: `<model>-operator` (e.g. `jjx-default-operator`). Like the postgres container naming, this uses a fixed suffix with no app name.
 
+**User**: Always `170:170`. See "container users" above.
+
 **Network**: The charm runner uses `--network=container:<workload>`, sharing the workload container's network namespace. This means charm code that connects to loopback addresses (`127.0.0.1`, `localhost`, `::1`) reaches the workload container directly.
 
 **Bind mounts** (all read-only unless noted):
@@ -162,7 +191,7 @@ The charm runner is a persistent Docker container that executes charm hooks.
 - `.jjx/charm/` → `/charm` (rw)
 - `.jjx/` → `/jjx` (rw)
 
-**Environment**: The charm runner container is started with `PYTHONPATH` set to `/venv/lib/python3.XX/site-packages:/jjx-src:/charm/lib`. However, `docker exec` does not inherit environment variables from `docker run`, so `jjx` passes `PATH` and `PYTHONPATH` explicitly via `docker exec -e` for each hook execution. This ensures both the charm process and its hook tool subprocesses can find `jjx` and the hook tools.
+**Environment**: The charm runner container is started with `PYTHONPATH` set to `/venv/lib/python3.XX/site-packages:/jjx-src:/charm/lib`, along with `HOME=/tmp` (the chiseled image has no passwd entry for UID 170) and `PYTHONDONTWRITEBYTECODE=1` (170-owned bytecode under the bind-mounted `/charm` would break restaging). However, `docker exec` does not inherit environment variables from `docker run`, so `jjx` passes `PATH`, `PYTHONPATH`, `HOME` and `PYTHONDONTWRITEBYTECODE` explicitly via `docker exec -e` for each hook execution. This ensures both the charm process and its hook tool subprocesses can find `jjx` and the hook tools.
 
 **Pebble socket**: A symlink is created inside the charm runner at `/charm/containers/<workload>/pebble.socket` → `/jjx/socket`, so `ops` can find the Pebble socket at the path it expects. The symlink and parent directory are created via Python (`pathlib.Path.mkdir` + `os.symlink`) because the charm runner image has no `mkdir` or `ln` in PATH. The symlink is **not** created at container startup or during `config-changed` — it is created by the background pebble-ready subprocess, after the minimum deploy delay (see "async pebble-ready" below). This models real Juju, where `config-changed` fires before the workload container has started, so the charm cannot reach Pebble yet. The charm's `_replan_workload` hits a `ConnectionError` and returns early, just like it does in real Juju.
 
@@ -189,16 +218,18 @@ Deploy flow:
 
 1. ensure `./.jjx` exists and load state
 2. stage runtime charm files in `./.jjx/charm/` (`src/`, `metadata.yaml`, `config.yaml`)
-3. pre-pull the workload image with retry (see "image pull retries" below), then start workload container and Pebble with explicit `--network bridge` (no host networking)
-   - Pebble is started with `run --hold --create-dirs` so baked-in layers (e.g. Rockcraft layers with `startup: enabled`) do not autostart services before the charm's pebble-ready hook fires — matching real Juju, which also uses `--hold`
+3. gate on `charm-user` from charmcraft.yaml (see "container users" above): `root`/`sudoer` fail the deploy, unset warns
+4. pre-pull the workload image with retry (see "image pull retries" below), then start workload container and Pebble with explicit `--network bridge` (no host networking)
+   - Pebble is started with `run --hold --create-dirs --identities /jjx/pebble/identities.yaml` so baked-in layers (e.g. Rockcraft layers with `startup: enabled`) do not autostart services before the charm's pebble-ready hook fires — matching real Juju, which also uses `--hold`. The identities file grants UID 170 admin access (see "container users" above).
+   - the workload container runs with `--user <uid>:<gid>` when the charm declares them, otherwise at the image's declared user, or root if the image declares none
    - if `JJX_PUBLISH` is set to `HOST_PORT:CONTAINER_PORT`, add port publish `127.0.0.1:HOST_PORT:CONTAINER_PORT`
    - the workload container's IP is stored in `state.json` as `container_ip` so hook tools (e.g. `network-get`) can access it without calling Docker directly
-4. start charm runner container (`--network=container:<workload>`, bind-mounts for Python, venv, jjx source, charm dir, state dir) — its image is pre-pulled the same way
-5. wait for Pebble socket (`/jjx/socket`) to be connectable inside charm runner
-6. generate hook tool scripts in `./.jjx/hook-tools/` (Python scripts with `#!/python/bin/python3.XX` shebangs)
-7. run `config-changed` hook via `docker exec` into charm runner (Pebble socket symlink does **not** exist yet — charm cannot reach Pebble, matching real Juju)
-8. persist resulting app and unit status
-9. spawn a detached background subprocess (see "async pebble-ready" below) and return
+5. start charm runner container (`--network=container:<workload>`, running as `170:170`, bind-mounts for Python, venv, jjx source, charm dir, state dir) — its image is pre-pulled the same way
+6. wait for Pebble socket (`/jjx/socket`) to be connectable inside charm runner
+7. generate hook tool scripts in `./.jjx/hook-tools/` (Python scripts with `#!/python/bin/python3.XX` shebangs)
+8. run `config-changed` hook via `docker exec` into charm runner (Pebble socket symlink does **not** exist yet — charm cannot reach Pebble, matching real Juju)
+9. persist resulting app and unit status
+10. spawn a detached background subprocess (see "async pebble-ready" below) and return
 
 The background subprocess:
 

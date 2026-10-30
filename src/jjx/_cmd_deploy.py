@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import sys
 import uuid
 from pathlib import Path
 from typing import Any
@@ -135,7 +136,12 @@ def _parse_deploy_args(args: list[str]) -> tuple[str, str, dict[str, str]]:
     return charm_path, app_name, resources
 
 
-def _workload_spec(charm_source: Path) -> tuple[str, str]:
+def _workload_spec(charm_source: Path) -> tuple[str, str, int | None, int | None]:
+    """Return the first container's name, resource, and declared uid/gid.
+
+    The ``uid``/``gid`` values come from the container spec in charmcraft.yaml;
+    both are ``None`` when the charm does not declare them.
+    """
     data = _engine._read_yaml(charm_source / "charmcraft.yaml")
     containers = data.get("containers", {})
     if isinstance(containers, dict) and containers:
@@ -148,8 +154,76 @@ def _workload_spec(charm_source: Path) -> tuple[str, str]:
         resource_name = first_spec.get("resource")
         if not isinstance(resource_name, str) or not resource_name:
             raise _engine.CliError(f"container {first_name} must define a resource")
-        return first_name, resource_name
+        uid, gid = _resolve_workload_uid_gid(first_name, first_spec)
+        return first_name, resource_name, uid, gid
     raise _engine.CliError("charm must define at least one workload container")
+
+
+def _resolve_workload_uid_gid(
+    container_name: str, spec: dict[str, Any]
+) -> tuple[int | None, int | None]:
+    """Return the declared uid/gid for a container, or (None, None).
+
+    Juju reserves uid/gid values in 1000-9999 for its container users and
+    rejects charms that declare them; jjx matches that and fails the deploy.
+    """
+    uid = spec.get("uid")
+    gid = spec.get("gid")
+    result: list[int | None] = []
+    for label, value in (("uid", uid), ("gid", gid)):
+        if value is None:
+            result.append(None)
+            continue
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise _engine.CliError(f"container {container_name} {label} must be an integer")
+        if 1000 <= value <= 9999:
+            raise _engine.CliError(
+                f"container {container_name} {label} {value} is in Juju's reserved range "
+                "(1000-9999); pick a value outside it"
+            )
+        result.append(value)
+    return result[0], result[1]
+
+
+def _workload_user_arg(uid: int | None, gid: int | None) -> str | None:
+    """Return the --user value for the workload container, or None.
+
+    None means "pass no --user" so the image's declared user applies, or root
+    (the OCI default) when the image declares none.
+    """
+    if uid is None and gid is None:
+        return None
+    if uid is not None and gid is not None:
+        return f"{uid}:{gid}"
+    if uid is not None:
+        # gid undeclared; Juju's shape ties the gid to the uid, so pass 0.
+        return f"{uid}:0"
+    raise _engine.CliError(
+        "workload gid is declared without uid; declare both (Juju requires uid to set gid)"
+    )
+
+
+def _check_charm_user(charm_source: Path, out: Any) -> None:
+    """Gate on charm-user from charmcraft.yaml.
+
+    `non-root` deploys silently. Unset also deploys, but with a warning pointing
+    at `charm-user: non-root`. Anything else fails the deploy: jjx has no code
+    path that runs charm code as root.
+    """
+    data = _engine._read_yaml(charm_source / "charmcraft.yaml")
+    charm_user = data.get("charm-user")
+    if charm_user is None:
+        out.write(
+            "warning: charm-user is not set in charmcraft.yaml; jjx runs charm code as "
+            "non-root (user 170). Set `charm-user: non-root` in charmcraft.yaml to "
+            "match jjx's behavior.\n"
+        )
+        return
+    if charm_user != "non-root":
+        raise _engine.CliError(
+            f"charm-user {charm_user!r} is not supported by jjx: jjx only runs charm code "
+            "as non-root (user 170). Set `charm-user: non-root` in charmcraft.yaml."
+        )
 
 
 def deploy(args: list[str], model: str | None) -> int:
@@ -188,7 +262,8 @@ def deploy(args: list[str], model: str | None) -> int:
         return _deploy_virtual(state, model_name, app_name, virtual_kind)
 
     charm_source = _engine._discover_charm_source(charm_path, app_name)
-    workload, resource_name = _workload_spec(charm_source)
+    _check_charm_user(charm_source, sys.stderr)
+    workload, resource_name, workload_uid, workload_gid = _workload_spec(charm_source)
     image = resources.get(resource_name)
     if not image:
         raise _engine.CliError(f"missing required --resource {resource_name}=<image>")
@@ -242,6 +317,16 @@ def deploy(args: list[str], model: str | None) -> int:
     # enabled) so that charm layers using override: merge inherit them correctly.
     _copy_image_pebble_layers(image, pebble_layers_dir)
 
+    # Write the identity granting user 170 (the charm runner) admin access.
+    # `pebble run --identities` seeds it into the daemon at startup, below.
+    _engine._write_pebble_identity(jjx_dir)
+
+    # Make the shared state directories group-writable before either container
+    # starts. The workload's Pebble daemon writes its socket and state file into
+    # .jjx; the charm runner (170) writes hook state. Neither UID owns the
+    # directories, so both need the group grant.
+    _engine._prepare_shared_dirs()
+
     _engine._docker_pull_with_retry(image)
 
     mounts = [
@@ -260,11 +345,15 @@ def deploy(args: list[str], model: str | None) -> int:
             "PEBBLE_SOCKET": "/jjx/socket",
             "PYTHONPATH": "/",
         },
-        user=_engine._container_user(),
+        user=_workload_user_arg(workload_uid, workload_gid),
+        # The Pebble daemon writes into the shared state directories as the
+        # workload user, so it needs the same group grant as the charm runner.
+        # A root workload is unaffected; root needs no supplemental group.
+        group_add=str(os.getgid()),
         network="bridge",
         workdir="/plan",
         entrypoint="/charm/bin/pebble",
-        command=["run", "--hold", "--create-dirs"],
+        command=["run", "--hold", "--create-dirs", "--identities", "/jjx/pebble/identities.yaml"],
     )
     model_state["apps"][app_name]["container_id"] = container_id
     # Store the workload container's IP address in state so hook tools
