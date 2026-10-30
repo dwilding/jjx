@@ -18,6 +18,8 @@ Optional flags:
 
 `jjx` handles the full lifecycle: preflight cleanup of any stale state, a Docker availability check, creating and removing the placeholder charm artifact, invoking pytest, and tearing down on exit. After pytest finishes, `jjx` checks whether the charm's workload container is running (virtual charm containers don't count). If it is, `jjx` waits for Ctrl-C (or detaches with `-d`); if not, `jjx` tears down all models and exits.
 
+jjx's own errors and warnings share one format: an `Error: ` or `Warning: ` prefix, a capitalized first word unless that word is a proper name (`charm-user`, `pytest-jubilant`), and a trailing period. The `juju` shim's messages are outside this rule. They follow real Juju's shapes, because jubilant carries their stderr verbatim into the exceptions it raises.
+
 ## customization
 
 Additional pytest arguments can be appended to `jjx`'s built-in defaults in the charm project's `pyproject.toml`:

@@ -520,7 +520,7 @@ def _check_docker_available() -> None:
     """
     if shutil.which(_CONTAINER_BINARY) is None:
         raise CliError(
-            f"ERROR: '{_CONTAINER_BINARY}' not found on PATH. Install Docker and try again."
+            f"Error: '{_CONTAINER_BINARY}' not found on PATH. Install Docker and try again."
         )
     try:
         subprocess.run(
@@ -531,7 +531,7 @@ def _check_docker_available() -> None:
         )
     except subprocess.CalledProcessError:
         raise CliError(
-            "ERROR: Docker is not running. Start the Docker daemon and try again."
+            "Error: Docker is not running. Start the Docker daemon and try again."
         ) from None
 
 

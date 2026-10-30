@@ -244,14 +244,14 @@ def jjx_pytest_args(charm_root: Path, cli_extra_args: list[str] | None = None) -
         with pyproject.open("rb") as fp:
             config = tomllib.load(fp)
     except tomllib.TOMLDecodeError as exc:
-        raise _engine.CliError(f"ERROR: Invalid pyproject.toml: {exc}") from exc
+        raise _engine.CliError(f"Error: Invalid pyproject.toml: {exc}.") from exc
 
     extra_args = config.get("tool", {}).get("jjx", {}).get("pytest-extra-args")
     if extra_args is None:
         return [*default_args, *cli_args]
 
     if not isinstance(extra_args, list) or not all(isinstance(arg, str) for arg in extra_args):
-        raise _engine.CliError("ERROR: [tool.jjx].pytest-extra-args must be an array of strings")
+        raise _engine.CliError("Error: [tool.jjx].pytest-extra-args must be an array of strings.")
 
     return [*default_args, *extra_args, *cli_args]
 
@@ -444,16 +444,16 @@ def jjx_cli() -> int:
         charm_user = _cmd_deploy.read_charm_user(charm_root)
         if charm_user is not None and charm_user != "non-root":
             sys.stderr.write(
-                f"ERROR: charm-user {charm_user!r} is not supported by jjx: jjx only runs "
+                f"Error: charm-user {charm_user!r} is not supported by jjx. jjx only runs "
                 "charm code as non-root (user 170). Set `charm-user: non-root` in "
                 "charmcraft.yaml.\n"
             )
             return 1
         if charm_user is None:
             sys.stderr.write(
-                "warning: charm-user is not set in charmcraft.yaml; jjx runs charm code as "
-                "non-root (user 170). Set `charm-user: non-root` in charmcraft.yaml to "
-                "match jjx's behavior.\n"
+                "Warning: charm-user is not set in charmcraft.yaml. jjx runs charm "
+                "code as non-root (user 170). Set `charm-user: non-root` in "
+                "charmcraft.yaml to match jjx's behavior.\n"
             )
             sys.stderr.flush()
 
@@ -467,7 +467,7 @@ def jjx_cli() -> int:
             publish = jjx_args[idx + 1]
             if not re.match(r"^\d+:\d+$", publish):
                 sys.stderr.write(
-                    f"ERROR: Invalid port format '{publish}': expected <number>:<number>\n"
+                    f"Error: Invalid port format '{publish}': expected <number>:<number>.\n"
                 )
                 return 2
 
@@ -475,7 +475,7 @@ def jjx_cli() -> int:
         pytest_args = jjx_pytest_args(charm_root, cli_pytest_args)
         if "--no-juju-teardown" in pytest_args and not _has_pytest_jubilant(charm_root):
             raise _engine.CliError(
-                "ERROR: pytest-jubilant is not in the 'integration' dependency group."
+                "Error: pytest-jubilant is not in the 'integration' dependency group."
             )
     except _engine.CliError as exc:
         if exc.message:
