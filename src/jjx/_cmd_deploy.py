@@ -9,7 +9,6 @@ from __future__ import annotations
 import os
 import re
 import subprocess
-import sys
 import uuid
 from pathlib import Path
 from typing import Any
@@ -203,23 +202,25 @@ def _workload_user_arg(uid: int | None, gid: int | None) -> str | None:
     )
 
 
-def _check_charm_user(charm_source: Path, out: Any) -> None:
+def charm_user_unset(charm_source: Path) -> bool:
+    """Report whether charmcraft.yaml leaves charm-user unset."""
+    data = _engine._read_yaml(charm_source / "charmcraft.yaml")
+    return data.get("charm-user") is None
+
+
+def _check_charm_user(charm_source: Path) -> None:
     """Gate on charm-user from charmcraft.yaml.
 
-    `non-root` deploys silently. Unset also deploys, but with a warning pointing
-    at `charm-user: non-root`. Anything else fails the deploy: jjx has no code
-    path that runs charm code as root.
+    `non-root` and unset both deploy; anything else fails the deploy: jjx has no
+    code path that runs charm code as root. The unset warning is printed by the
+    `jjx` CLI, not here — under `jjx` this runs inside the pytest tree, whose
+    stderr capture hides a warning from the user.
     """
     data = _engine._read_yaml(charm_source / "charmcraft.yaml")
     charm_user = data.get("charm-user")
-    if charm_user is None:
-        out.write(
-            "warning: charm-user is not set in charmcraft.yaml; jjx runs charm code as "
-            "non-root (user 170). Set `charm-user: non-root` in charmcraft.yaml to "
-            "match jjx's behavior.\n"
-        )
-        return
     if charm_user != "non-root":
+        if charm_user is None:
+            return
         raise _engine.CliError(
             f"charm-user {charm_user!r} is not supported by jjx: jjx only runs charm code "
             "as non-root (user 170). Set `charm-user: non-root` in charmcraft.yaml."
@@ -262,7 +263,7 @@ def deploy(args: list[str], model: str | None) -> int:
         return _deploy_virtual(state, model_name, app_name, virtual_kind)
 
     charm_source = _engine._discover_charm_source(charm_path, app_name)
-    _check_charm_user(charm_source, sys.stderr)
+    _check_charm_user(charm_source)
     workload, resource_name, workload_uid, workload_gid = _workload_spec(charm_source)
     image = resources.get(resource_name)
     if not image:

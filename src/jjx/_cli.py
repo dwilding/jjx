@@ -435,6 +435,19 @@ def jjx_cli() -> int:
             sys.stderr.write(exc.message + "\n")
         return exc.exit_code
 
+    charm_root = _engine._project_root()
+    # Preflight: warn about an unset charm-user here, where the user sees it.
+    # Deploy checks charm-user when the test harness invokes the juju shim,
+    # but its stderr is captured by pytest, so only the CLI's preflight
+    # warning reaches the terminal.
+    if (charm_root / "charmcraft.yaml").exists() and _cmd_deploy.charm_user_unset(charm_root):
+        sys.stderr.write(
+            "warning: charm-user is not set in charmcraft.yaml; jjx runs charm code as "
+            "non-root (user 170). Set `charm-user: non-root` in charmcraft.yaml to "
+            "match jjx's behavior.\n"
+        )
+        sys.stderr.flush()
+
     detach = "-d" in jjx_args
 
     # Extract -p flag for port publishing.
@@ -449,7 +462,6 @@ def jjx_cli() -> int:
                 )
                 return 2
 
-    charm_root = _engine._project_root()
     try:
         pytest_args = jjx_pytest_args(charm_root, cli_pytest_args)
         if "--no-juju-teardown" in pytest_args and not _has_pytest_jubilant(charm_root):

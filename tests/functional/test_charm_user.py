@@ -79,7 +79,7 @@ def remove_charm_user(charm_dir: pathlib.Path) -> None:
     path.write_text("".join(lines))
 
 
-def assert_runner_user(expected: str) -> None:
+def assert_runner_user(container_name: str, expected: str) -> None:
     runtime = jjx.container_runtime()
     result = subprocess.run(
         [
@@ -87,7 +87,7 @@ def assert_runner_user(expected: str) -> None:
             "inspect",
             "--format",
             "{{.Config.User}}",
-            CHARM_RUNNER_NAME,
+            container_name,
         ],
         capture_output=True,
         text=True,
@@ -128,6 +128,23 @@ def remove_app(charm_dir: pathlib.Path) -> None:
     )
 
 
+def jjx_down(charm_dir: pathlib.Path) -> subprocess.CompletedProcess[str]:
+    command = [
+        "uvx",
+        "--with-editable",
+        PACKAGE_DIR,
+        "jjx",
+        "down",
+    ]
+    return subprocess.run(
+        command,
+        cwd=charm_dir,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
 def test_charm_user_non_root_runs_170(charm_dir):
     # Backstop: the stored charm declares non-root.
     assert read_charm_user(charm_dir) == "non-root"
@@ -142,7 +159,7 @@ def test_charm_user_non_root_runs_170(charm_dir):
         # own unrelated warnings, so match the message, not the word.)
         assert "charm-user is not set" not in result.stderr
         # The charm runner runs as 170:170.
-        assert_runner_user("170:170")
+        assert_runner_user(CHARM_RUNNER_NAME, "170:170")
         # TEARDOWN
         remove_app(charm_dir)
     finally:
@@ -180,20 +197,46 @@ def test_charm_user_sudoer_fails(charm_dir):
 def test_charm_user_unset_warns_and_runs_170(charm_dir):
     # Remove the declaration.
     remove_charm_user(charm_dir)
-    # Deploy succeeds with a warning.
-    result = deploy(charm_dir)
+    # Run the full jjx CLI. The warning prints at preflight, on stderr, where
+    # pytest's capture of the deploy subprocess would otherwise hide it.
+    # Detach (-d) so jjx exits after the run instead of waiting for Ctrl-C.
+    command = [
+        "uvx",
+        "--with-editable",
+        PACKAGE_DIR,
+        "jjx",
+        "-d",
+        "--",
+        "-k",
+        "test_deploy",
+    ]
+    result = subprocess.run(
+        command,
+        cwd=charm_dir,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
     try:
         assert result.returncode == 0, (
-            f"juju deploy exited with code {result.returncode}\n"
+            f"jjx exited with code {result.returncode}\n"
             f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
         assert "warning: charm-user is not set" in result.stderr
         assert "charm-user: non-root" in result.stderr
+        # pytest-jubilant names its model jubilant-<hex>-test-charm, so the
+        # charm runner is named after that model. Parse the model from the
+        # hint jjx prints after the test session.
+        model_prefix = result.stdout.split("--juju-model ")[1].split()[0]
         # The charm runner still runs as 170:170.
-        assert_runner_user("170:170")
+        assert_runner_user(f"{model_prefix}-test-charm-operator", "170:170")
         # TEARDOWN
-        remove_app(charm_dir)
+        result = jjx_down(charm_dir)
+        assert result.returncode == 0, (
+            f"jjx down exited with code {result.returncode}\n"
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
     finally:
-        # Safety net: remove the app in case an assertion failed
+        # Safety net: tear down the model in case an assertion failed
         # before TEARDOWN completed.
-        remove_app(charm_dir)
+        jjx_down(charm_dir)
