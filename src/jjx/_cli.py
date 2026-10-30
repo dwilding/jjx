@@ -451,8 +451,9 @@ def jjx_cli() -> int:
         if charm_user is None:
             # The blank line separates the warning from the pytest banner.
             sys.stderr.write(
-                "Warning: charm-user is not set. jjx expects rootless charm code. Set "
-                "'charm-user: non-root' in charmcraft.yaml.\n\n"
+                "Warning: charm-user is not set. jjx expects rootless charm code, whereas "
+                "Juju grants root, so this charm might misbehave. Set 'charm-user: non-root' "
+                "in charmcraft.yaml.\n\n"
             )
             sys.stderr.flush()
 
