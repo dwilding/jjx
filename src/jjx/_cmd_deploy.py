@@ -324,8 +324,10 @@ def deploy(args: list[str], model: str | None) -> int:
     # Make the shared state directories group-writable before either container
     # starts. The workload's Pebble daemon writes its socket and state file into
     # .jjx; the charm runner (170) writes hook state. Neither UID owns the
-    # directories, so both need the group grant.
-    _engine._prepare_shared_dirs()
+    # directories, so both need the group grant. Pre-creating the socket
+    # directory keeps the pebble-ready subprocess from leaving UID-170-owned
+    # directories the host cannot remove at teardown.
+    _engine._prepare_shared_dirs(workload)
 
     _engine._docker_pull_with_retry(image)
 

@@ -145,7 +145,7 @@ def _write_gitignore_atomic() -> None:
     os.replace(tmp_path, _gitignore_path())
 
 
-def _prepare_shared_dirs() -> None:
+def _prepare_shared_dirs(workload_name: str | None = None) -> None:
     """Make the shared state directories writable by the host group.
 
     The charm runner runs as UID 170, which has no corresponding host user.
@@ -153,28 +153,46 @@ def _prepare_shared_dirs() -> None:
     group-writable (0775) lets 170 create state files (hook results, logs,
     pebble-ready markers) that the host can still read and remove — and vice
     versa. Call before starting any container that mounts .jjx.
+
+    With a workload name, also pre-create the charm runner's socket directory
+    (charm/containers/<workload>). The pebble-ready subprocess creates it inside
+    the container otherwise, where the runner's umask leaves it 755 and owned by
+    UID 170 — a directory the host cannot delete, so teardown of .jjx fails.
+    Deploy's host-side precreation sidesteps that entirely.
     """
     modes = {
         _jjx_dir(): 0o775,
         _jjx_dir() / "charm": 0o775,
         _jjx_dir() / "pebble": 0o775,
     }
+    if workload_name:
+        modes[_jjx_dir() / "charm" / "containers" / workload_name] = 0o775
     for path, mode in modes.items():
+        path.mkdir(parents=True, exist_ok=True)
         if path.is_dir():
-            os.chmod(path, mode)
+            try:
+                os.chmod(path, mode)
+            except OSError:
+                # An earlier container run may have left the directory owned by
+                # UID 170; the host cannot chmod it. Teardown will fall back to
+                # `sudo rm -rf .jjx` (see DESIGN.md).
+                pass
 
 
 def _write_pebble_identity(jjx_dir: Path) -> Path:
-    """Write .jjx/pebble/identities.yaml granting UID 170 admin access.
+    """Write .jjx/pebble/identities.yaml granting admin access to UID 170 and the host user.
 
     The file is passed to `pebble run --identities` by deploy. Pebble reads
     identities only from its state, seeded at daemon startup via that flag —
     simply placing the file in $PEBBLE has no effect.
 
-    Why it's needed: the socket grants admin only to the daemon's own UID (or
+    Why they're needed: the socket grants admin only to the daemon's own UID (or
     root). The charm runner (always 170) is rarely the daemon's UID — the daemon
-    runs as the image's declared user (or root) — so without this identity the
-    charm's Container.push/replan/add-layer calls would be read-only.
+    runs as the image's declared user (or root) — so without the 170 identity the
+    charm's Container.push/replan/add-layer calls would be read-only. The host
+    identity keeps host-side tools (borescope against .jjx/socket) working for
+    any workload user: before jjx ran the daemon as the host user, which gave
+    those tools admin implicitly.
     """
     pebble_dir = jjx_dir / "pebble"
     pebble_dir.mkdir(parents=True, exist_ok=True)
@@ -184,7 +202,11 @@ def _write_pebble_identity(jjx_dir: Path) -> Path:
                 "charm": {
                     "access": "admin",
                     "local": {"user-id": 170},
-                }
+                },
+                "host": {
+                    "access": "admin",
+                    "local": {"user-id": os.getuid()},
+                },
             }
         },
         sort_keys=False,
