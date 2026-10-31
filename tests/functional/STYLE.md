@@ -215,7 +215,7 @@ else:
 
 ## Runtime markers
 
-- Mark a test `@pytest.mark.docker` or `@pytest.mark.podman` when it only works under one runtime: a machine normally has one installed, not both.
+- Mark a test `@pytest.mark.docker` or `@pytest.mark.podman` when it only works under one runtime: commonly because a machine normally has one installed, not both, but also when a test depends on a runtime-specific behavior (for example, host-reachable container IPs under Docker's bridge versus rootless Podman's userspace NAT).
 - `conftest.py` skips runtime-marked tests whose marker does not match the pinned runtime (`JJX_RUNTIME`, defaulting to `docker` when unset). Unmarked tests run under both.
 - CI runs a `runtime: [docker, podman]` matrix and sets `JJX_RUNTIME` for each leg, so marked tests get a lane of their own and unmarked tests run twice — once per runtime.
 - When a test asserts on a runtime-specific error message, the shim plus a `JJX_RUNTIME` pin is the pattern: `test_jjx_cli_needs_docker` shims a failing `docker` onto `PATH` and pins `JJX_RUNTIME=docker` so prefer-Podman detection cannot dodge the shim. The podman twin follows the same shape.
