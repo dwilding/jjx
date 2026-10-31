@@ -39,9 +39,9 @@ We selected the smoke tests (the ones decorated `@pytest.mark.smoke`) because we
 For now, open a second terminal and play with the workload:
 
 ```sh
-curl http://172.17.0.2:8000/names  # returns {"names":{}}
-curl -X POST -d 'name=elephant' http://172.17.0.2:8000/addname/
 curl http://172.17.0.2:8000/names  # returns {"names":{"1":"elephant"}}
+curl -X POST -d 'name=frog' http://172.17.0.2:8000/addname/
+curl http://172.17.0.2:8000/names  # returns {"names":{"1":"elephant","2":"frog"}}
 ```
 
 You might need to use a different IP address — check the output of `uvx jjx`.
