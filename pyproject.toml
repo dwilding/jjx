@@ -48,3 +48,7 @@ exclude = [
 norecursedirs = [
     "tests/functional/charms",
 ]
+markers = [
+    "docker: run this test only when JJX_RUNTIME=docker",
+    "podman: run this test only when JJX_RUNTIME=podman",
+]

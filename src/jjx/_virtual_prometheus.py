@@ -18,9 +18,6 @@ scrapes the workload's ``/metrics`` endpoint at its bridge IP.
 from __future__ import annotations
 
 import json
-import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -33,22 +30,19 @@ PROMETHEUS_PORT = 9090
 
 
 def _wait_for_prometheus(container_name: str, timeout: float = 60.0) -> None:
-    """Wait until Prometheus is ready to serve queries."""
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        try:
-            details = _engine._docker_container_details(container_name)
-            if not details.running or not details.ip_address:
-                time.sleep(1.0)
-                continue
-            url = f"http://{details.ip_address}:{PROMETHEUS_PORT}/-/ready"
-            with urllib.request.urlopen(url, timeout=5.0) as response:
-                if response.status == 200:
-                    return
-        except (urllib.error.URLError, urllib.error.HTTPError, _engine.CliError):
-            pass
-        time.sleep(1.0)
-    raise _engine.CliError(f"prometheus did not become ready in {container_name}")
+    """Wait until Prometheus is ready to serve queries.
+
+    The poll comes from outside the Prometheus image (see
+    ``_engine._wait_for_http``), so it works with images that ship no client
+    tools.
+    """
+    _engine._wait_for_http(
+        container_name,
+        "prometheus",
+        PROMETHEUS_PORT,
+        "/-/ready",
+        timeout=timeout,
+    )
 
 
 def start_prometheus(
@@ -83,6 +77,9 @@ def start_prometheus(
     container_id = _engine._docker_run(
         PROMETHEUS_IMAGE,
         container_name,
+        # See the Loki comment: pin the shared bridge so both runtimes land
+        # on the network where relation peers reach each other.
+        network="bridge",
         mounts=[(str(config_dir), "/etc/prometheus", False)],
         tmpfs_mounts=["/prometheus:mode=1777"],
         command=[
@@ -125,15 +122,14 @@ def _write_prometheus_config(config_dir: Path, scrape_configs: list[dict[str, An
 
 
 def _reload_prometheus(container_name: str) -> None:
-    """Reload Prometheus config via the HTTP API."""
+    """Reload Prometheus config over the HTTP API."""
     details = _engine._docker_container_details(container_name)
     if not details.running or not details.ip_address:
         return
     url = f"http://{details.ip_address}:{PROMETHEUS_PORT}/-/reload"
     try:
-        req = urllib.request.Request(url, method="POST")
-        urllib.request.urlopen(req, timeout=5.0)
-    except (urllib.error.URLError, urllib.error.HTTPError):
+        _engine.http_post(url)
+    except _engine.CliError:
         # If reload fails, the config will be picked up on next restart
         pass
 

@@ -11,6 +11,14 @@ permissions: {}
 jobs:
   functional:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Both runtimes ship on ubuntu-latest; the matrix pins each so the
+        # runtime-marked tests get a lane and the unmarked ones run under
+        # both.
+        runtime: [docker, podman]
+    name: functional (${{ matrix.runtime }})
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -20,4 +28,5 @@ jobs:
       - name: Run functional tests
         env:
           UV_PYTHON: '3.11'
+          JJX_RUNTIME: ${{ matrix.runtime }}
         run: uvx --from rust-just@1.59.0 just functional
