@@ -244,14 +244,14 @@ def jjx_pytest_args(charm_root: Path, cli_extra_args: list[str] | None = None) -
         with pyproject.open("rb") as fp:
             config = tomllib.load(fp)
     except tomllib.TOMLDecodeError as exc:
-        raise _engine.CliError(f"ERROR: Invalid pyproject.toml: {exc}") from exc
+        raise _engine.CliError(f"Error: Invalid pyproject.toml: {exc}.") from exc
 
     extra_args = config.get("tool", {}).get("jjx", {}).get("pytest-extra-args")
     if extra_args is None:
         return [*default_args, *cli_args]
 
     if not isinstance(extra_args, list) or not all(isinstance(arg, str) for arg in extra_args):
-        raise _engine.CliError("ERROR: [tool.jjx].pytest-extra-args must be an array of strings")
+        raise _engine.CliError("Error: [tool.jjx].pytest-extra-args must be an array of strings.")
 
     return [*default_args, *extra_args, *cli_args]
 
@@ -435,6 +435,28 @@ def jjx_cli() -> int:
             sys.stderr.write(exc.message + "\n")
         return exc.exit_code
 
+    charm_root = _engine._project_root()
+    # Preflight: gate on charm-user here, where the user sees it. Deploy
+    # re-checks when the test harness invokes the juju shim, but its stderr
+    # is captured by pytest, so only this preflight's message reaches the
+    # terminal. Rejecting root/sudoer here also means pytest never starts.
+    if (charm_root / "charmcraft.yaml").exists():
+        charm_user = _cmd_deploy.read_charm_user(charm_root)
+        if charm_user is not None and charm_user != "non-root":
+            sys.stderr.write(
+                f"Error: charm-user {charm_user!r} is not supported. jjx expects rootless "
+                "charm code. Set 'charm-user: non-root' in charmcraft.yaml.\n"
+            )
+            return 1
+        if charm_user is None:
+            # The blank line separates the warning from the pytest banner.
+            sys.stderr.write(
+                "Warning: charm-user is not set. jjx expects rootless charm code, whereas "
+                "Juju grants root, so this charm might misbehave. Set 'charm-user: non-root' "
+                "in charmcraft.yaml.\n\n"
+            )
+            sys.stderr.flush()
+
     detach = "-d" in jjx_args
 
     # Extract -p flag for port publishing.
@@ -445,16 +467,15 @@ def jjx_cli() -> int:
             publish = jjx_args[idx + 1]
             if not re.match(r"^\d+:\d+$", publish):
                 sys.stderr.write(
-                    f"ERROR: Invalid port format '{publish}': expected <number>:<number>\n"
+                    f"Error: Invalid port format '{publish}': expected <number>:<number>.\n"
                 )
                 return 2
 
-    charm_root = _engine._project_root()
     try:
         pytest_args = jjx_pytest_args(charm_root, cli_pytest_args)
         if "--no-juju-teardown" in pytest_args and not _has_pytest_jubilant(charm_root):
             raise _engine.CliError(
-                "ERROR: pytest-jubilant is not in the 'integration' dependency group."
+                "Error: pytest-jubilant is not in the 'integration' dependency group."
             )
     except _engine.CliError as exc:
         if exc.message:

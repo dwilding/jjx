@@ -35,7 +35,7 @@ def test_jjx_cli_needs_plugin(k8s_2_configurable):
         check=False,
     )
     assert result.returncode == 1
-    assert "ERROR: pytest-jubilant is not in the 'integration' dependency group." in result.stderr
+    assert "Error: pytest-jubilant is not in the 'integration' dependency group." in result.stderr
     assert not (k8s_2_configurable / ".jjx").exists()
     assert not (k8s_2_configurable / "placeholder.charm").exists()
 
@@ -63,6 +63,6 @@ def test_jjx_cli_needs_docker(k8s_2_configurable):
         check=False,
     )
     assert result.returncode == 1
-    assert "ERROR: Docker is not running." in result.stderr
+    assert "Error: Docker is not running." in result.stderr
     assert not (k8s_2_configurable / ".jjx").exists()
     assert not (k8s_2_configurable / "placeholder.charm").exists()

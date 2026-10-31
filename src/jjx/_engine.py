@@ -115,16 +115,109 @@ def _load_state() -> dict[str, Any]:
 def _save_state(state: dict[str, Any]) -> None:
     jjx = _jjx_dir()
     jjx.mkdir(parents=True, exist_ok=True)
-    _gitignore_path().write_text("*\n", encoding="utf-8")
+    _write_gitignore_atomic()
     _hook_tools_dir().mkdir(parents=True, exist_ok=True)
     # Write to a temp file then atomically replace, so a concurrent _load_state
-    # reader sees either the old or new file, never a half-written one.
+    # reader sees either the old or new file, never a half-written one. Pin 0644:
+    # a container running under umask 0077 must not produce a state file the
+    # host (or the next container) cannot read. Directory write access is
+    # sufficient because of the rename; the file perms only need to allow reads.
     tmp_path = _state_path().with_suffix(".json.tmp")
     tmp_path.write_text(
         json.dumps(state, indent=2, sort_keys=True),
         encoding="utf-8",
     )
+    os.chmod(tmp_path, 0o644)
     os.replace(tmp_path, _state_path())
+
+
+def _write_gitignore_atomic() -> None:
+    """Write .jjx/.gitignore via temp-file + rename.
+
+    In-place rewrite breaks once a container-side save has made the file
+    root/170-owned: the host's next in-place write fails at any umask. The
+    rename pattern keeps every writer working regardless of the old file's
+    ownership (host or container).
+    """
+    tmp_path = _gitignore_path().with_suffix(".gitignore.tmp")
+    tmp_path.write_text("*\n", encoding="utf-8")
+    os.chmod(tmp_path, 0o644)
+    os.replace(tmp_path, _gitignore_path())
+
+
+def _prepare_shared_dirs(workload_name: str | None = None) -> None:
+    """Make the shared state directories writable by the host group.
+
+    The charm runner runs as UID 170, which has no corresponding host user.
+    Adding the host GID to the runner's groups and making the state directories
+    group-writable (0775) lets 170 create state files (hook results, logs,
+    pebble-ready markers) that the host can still read and remove — and vice
+    versa. Call before starting any container that mounts .jjx.
+
+    With a workload name, also pre-create the charm runner's socket directory
+    (charm/containers/<workload>). The pebble-ready subprocess creates it inside
+    the container otherwise, where the runner's umask leaves it 0755 and owned
+    by UID 170 — permissions the host cannot relax, so later chmod-based setup
+    and cleanup on it fail. Deploy's host-side precreation sidesteps that: the
+    directory stays owned (and re-chmoddable) by the host.
+    """
+    modes = {
+        _jjx_dir(): 0o775,
+        _jjx_dir() / "charm": 0o775,
+        _jjx_dir() / "pebble": 0o775,
+    }
+    if workload_name:
+        modes[_jjx_dir() / "charm" / "containers" / workload_name] = 0o775
+    for path, mode in modes.items():
+        path.mkdir(parents=True, exist_ok=True)
+        if path.is_dir():
+            try:
+                os.chmod(path, mode)
+            except OSError:
+                # An earlier container run may have left the directory owned by
+                # UID 170; the host cannot chmod it. Group write on the parents
+                # still lets teardown delete it (rmtree needs no ownership of
+                # what it removes under a writable parent).
+                pass
+
+
+def _write_pebble_identity(jjx_dir: Path) -> Path:
+    """Write .jjx/pebble/identities.yaml granting admin access to UID 170 and the host user.
+
+    The file is passed to `pebble run --identities` by deploy. Pebble reads
+    identities only from its state, seeded at daemon startup via that flag —
+    simply placing the file in $PEBBLE has no effect.
+
+    Why they're needed: the socket grants admin only to the daemon's own UID (or
+    root). The charm runner (always 170) is rarely the daemon's UID — the daemon
+    runs as the image's declared user (or root) — so without the 170 identity the
+    charm's Container.push/replan/add-layer calls would be read-only. The host
+    identity keeps host-side tools (borescope against .jjx/socket) working for
+    any workload user, and grants nothing the host user doesn't already have:
+    they control the containers, so the socket was never a boundary against
+    them.
+    """
+    pebble_dir = jjx_dir / "pebble"
+    pebble_dir.mkdir(parents=True, exist_ok=True)
+    identity = yaml.safe_dump(
+        {
+            "identities": {
+                "charm": {
+                    "access": "admin",
+                    "local": {"user-id": 170},
+                },
+                "host": {
+                    "access": "admin",
+                    "local": {"user-id": os.getuid()},
+                },
+            }
+        },
+        sort_keys=False,
+    )
+    path = pebble_dir / "identities.yaml"
+    path.write_text(identity, encoding="utf-8")
+    os.chmod(path, 0o664)
+    return path
 
 
 def _cleanup_model_artifacts() -> None:
@@ -347,14 +440,26 @@ def _sanitize_container_name(name: str) -> str:
     return safe[:128]
 
 
-def _container_user() -> str:
-    """Return the ``--user`` value for container startup.
+# The UID:GID the charm runner always runs as. Real Juju runs charm code as
+# user 170 when charm-user is non-root; jjx runs it as 170 unconditionally.
+CHARM_RUNNER_USER = "170:170"
 
-    Docker: run as the host user so files written to bind-mounted volumes are
-    owned by the host user. Podman rootless will override this to ``"0:0"``
-    (container root maps to the host user).
+
+def _charm_runner_user() -> str:
+    """Return the ``--user`` value for the charm runner container.
+
+    Always 170:170 — jjx never runs charm code as root, regardless of what the
+    charm declares. ``charm-user: root``/``sudoer`` fail the deploy (see
+    _cmd_deploy._check_charm_user); unset is treated as non-root with a
+    warning. This is a deliberate divergence from real Juju, which runs charm
+    code as root when charm-user is unset: jjx shows the charm its destination
+    (non-root), not its legacy (root).
+
+    UID 170 has no corresponding host user, so for its writes into the shared
+    state directories to survive, the directories are group-writable and both
+    containers carry the host group (see _prepare_shared_dirs).
     """
-    return f"{os.getuid()}:{os.getgid()}"
+    return CHARM_RUNNER_USER
 
 
 def _split_resource(raw: str) -> tuple[str, str]:
@@ -417,7 +522,7 @@ def _check_docker_available() -> None:
     """
     if shutil.which(_CONTAINER_BINARY) is None:
         raise CliError(
-            f"ERROR: '{_CONTAINER_BINARY}' not found on PATH. Install Docker and try again."
+            f"Error: '{_CONTAINER_BINARY}' not found on PATH. Install Docker and try again."
         )
     try:
         subprocess.run(
@@ -428,7 +533,7 @@ def _check_docker_available() -> None:
         )
     except subprocess.CalledProcessError:
         raise CliError(
-            "ERROR: Docker is not running. Start the Docker daemon and try again."
+            "Error: Docker is not running. Start the Docker daemon and try again."
         ) from None
 
 
@@ -444,6 +549,7 @@ def _docker_run(
     entrypoint: str | None = None,
     command: list[str] | None = None,
     network: str | None = None,
+    group_add: str | None = None,
 ) -> str:
     cmd = [
         _CONTAINER_BINARY,
@@ -457,6 +563,9 @@ def _docker_run(
 
     if network:
         cmd.extend(["--network", network])
+
+    if group_add:
+        cmd.extend(["--group-add", group_add])
 
     if publish:
         cmd.extend(["--publish", publish])
@@ -919,8 +1028,18 @@ def _start_charm_runner(
         env={
             "PYTHONPATH": container_pythonpath,
             "TERM": "dumb",
+            # The chiseled image has passwd entries only for root and app (101):
+            # UID 170 cannot resolve a home directory, which confuses tools
+            # that write dotfiles. /tmp is writable by all UIDs and stateless.
+            "HOME": "/tmp",
+            # Never write __pycache__ to the bind-mounted /charm: 170-owned
+            # bytecode would break rmtree on the next _stage_runtime_charm.
+            "PYTHONDONTWRITEBYTECODE": "1",
         },
-        user=_container_user(),
+        user=_charm_runner_user(),
+        # Give the charm runner the host group so its files in the shared
+        # state directories remain readable/removable by the host.
+        group_add=str(os.getgid()),
         workdir="/charm",
         entrypoint=container_python,
         command=["-c", "import time; time.sleep(999999)"],
@@ -1193,6 +1312,7 @@ def _stage_runtime_charm(charm_source: Path, runtime_charm_dir: Path) -> None:
         "name",
         "summary",
         "description",
+        "charm-user",
         "containers",
         "resources",
         "requires",
@@ -1207,6 +1327,12 @@ def _stage_runtime_charm(charm_source: Path, runtime_charm_dir: Path) -> None:
         yaml.safe_dump(metadata, sort_keys=False),
         encoding="utf-8",
     )
+    # ops reads charm-user from metadata.yaml (Charmcraft packs it there from
+    # charmcraft.yaml), so stage it. jjx always runs the charm as non-root, so
+    # if the charm leaves it unset, stage what jjx actually does: non-root.
+    if "charm-user" not in metadata:
+        with (runtime_charm_dir / "metadata.yaml").open("a", encoding="utf-8") as f:
+            f.write("charm-user: non-root\n")
     (runtime_charm_dir / "config.yaml").write_text(
         yaml.safe_dump(data.get("config", {}), sort_keys=False),
         encoding="utf-8",
@@ -1314,6 +1440,13 @@ def _build_charm_env(
     pythonpath = app_state.get("container_pythonpath")
     if pythonpath:
         env["PYTHONPATH"] = pythonpath
+    # The charm runner runs as UID 170, which cannot resolve a home directory
+    # in the chiseled image (passwd has only root and app). Give hooks the same
+    # writable, stateless HOME as the runner container itself.
+    env["HOME"] = "/tmp"
+    # Never write __pycache__ into the bind-mounted /charm or /jjx trees from a
+    # docker exec: 170-owned bytecode would break the host's next stage/clean.
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
     return env
 
 
