@@ -87,7 +87,7 @@ runtimes and names docker.
 |---|---|---|---|
 | 24 | `_docker_container_details` inspect template | `{{.NetworkSettings.Networks}}` docker-shaped template | **verified** — podman 4.9.3 populates the path when the container runs `--network bridge`, and all five `_docker_run` sites now pass it explicitly (row 27), so empty-IP does not occur under jjx's invocation shape. The original scare was a slirp4netns default-network probe, not jjx's code path. |
 
-## Runtime divergences (rows 25–34)
+## Runtime divergences (rows 25–35)
 
 Behaviors, not literals: places where the two runtimes genuinely differ
 behind the same command, found while landing the support. Rows 31–34 carry
@@ -104,8 +104,9 @@ checkout.
 | 29 | **`_docker_rm` masks failures.** The return code is ignored, and after the 10s poll the function prints "Removed" unconditionally. | **open** — the ordering fix removed the known trigger (this mask is what hid it), but the next rm error would hide the same way. |
 | 31 | **UID map coverage (170).** The charm runner runs as `170:170`; the workload may declare any `uid`/`gid`, and undeclaring workloads run at the image's user. Rootless podman maps container IDs into the subuid/subgid allocations. | **resolved** — 170 falls inside even the *default* allocation (100000–165535), so the runner maps cleanly and bind-mount files come out host-owned. Verified live: runner at 170:170 works under this host's rootless podman. The one surface to watch is a workload declaring a uid or gid outside the allocations — jjx passes it straight to `--user`, and podman refuses at run, not pull. Not predictable from jjx's side; the run error names the value. |
 | 32 | **`_shared_dir_group()`** (plan's bullet: "the group-access mechanism changes") | **resolved** — `_shared_dir_group()` returns container group `"0"` under podman (container group 0 maps to the host user's own group under rootless mapping), else `os.getgid()` under docker. Rides the `_docker_run` `group_add` parameter (charm runner, `_cmd_deploy.py:357`). Under docker, host GID; under rootless podman, group 0. Same host-owned outcome. |
-| 33 | **Rocks chowned to 584792 (`_daemon_`).** Ubuntu rocks symlink/chown files to UID 584792 (`_daemon_`); rootless podman fails to unpack the image when 584792 falls outside `/etc/subuid`+`/etc/subgid` — at `pull`/`load`, with a confusing error ("potentially insufficient UIDs or GIDs", lchown: invalid argument). The plan called for catching this at image pull and printing the fix (extend subuid/subgid to cover 584792, then `podman system migrate`). | **half-resolved (docs).** README's "Podman user mapping" paragraph now covers the default-allocation gap and the fix. Still open in code: `_docker_pull_with_retry` doesn't inspect for the failure, and preflight doesn't probe subuid coverage, so the failure stays confusing until read. Two shapes to match at pull/run: (a) "insufficient UIDs/GIDs … Check /etc/subuid and /etc/subgid … podman system migrate" (rockcraft#911); (b) "container uses ID mappings … doesn't map UID 584792" (rockcraft#873). jjx's own fixture image (`ghcr.io/canonical/api_demo_server/api-demo-server`, user 584792) hits this on a stock machine. **Not reproducible on this host**: subuid/subgid were already extended (100000–1000000), covering 584792. |
+| 33 | **Rocks chowned to 584792 (`_daemon_`).** Ubuntu rocks symlink/chown files to UID 584792 (`_daemon_`); rootless podman fails to unpack the image when 584792 falls outside `/etc/subuid`+`/etc/subgid` — at `pull`/`load`, with a confusing error ("potentially insufficient UIDs or GIDs", lchown: invalid argument). The plan called for catching this at image pull and printing the fix (extend subuid/subgid to cover 584792, then `podman system migrate`). | **half-resolved (docs + CI).** README's "Podman user mapping" paragraph covers the default-allocation gap and the fix, and the podman CI leg applies it (`sed` the runner's lines to `100000:1000001`, then `podman system migrate`) so the `charm_user` rock-deploying tests pass there. Still open in code: `_docker_pull_with_retry` doesn't catch the failure shape and print the fix. Two shapes to match at pull/run: (a) "insufficient UIDs/GIDs … Check /etc/subuid and /etc/subgid … podman system migrate" (rockcraft#911); (b) "container uses ID mappings … doesn't map UID 584792" (rockcraft#873). jjx's own fixture image (`ghcr.io/canonical/api_demo_server/api-demo-server`, user 584792) hits this on a stock machine. **Not reproducible on this host**: subuid/subgid were already extended (100000–1100000), covering 584792. Confirmed live on CI: the podman leg's `charm_user` rock tests failed on stock allocation before the widening step existed. |
 | 34 | **Resolution rules from the root-questions plan need no change** (plan's bullet 4, see /home/david.wilding@canonical.com/gh/jjx/dwilding-root-question/JJX_PLAN_NEW.md) | **resolved** — the podman support preserved the full `charm-user`/`uid`/`gid` matrix (170:170 runner always, workload follows declarations, 1000–9999 rejected). Verified consistent with DESIGN.md's charm-runner section. |
+| 35 | **Inner charm tests fetch container IPs from the host.** The fastapi-demo integration tests urlopen the workload and Loki IPs directly, with no timeout on the Loki fetch (row 28's reachability gap from the *test's* side). Under rootless podman the SYN black-holes, so `test_loki_data` hangs forever instead of failing. jjx can't fix upstream test code. | **resolved (markers)** — the two fastapi golden tests are `@pytest.mark.docker`: they depend on host-reachable container IPs, which docker provides and rootless podman cannot. The other golden tests stay unmarked and run under both. CI additionally widens the podman runner's subuid allocation (row 33) so the `charm_user` rock-deploying tests pass on the podman leg. |
 
 ## Prioritized recommendations
 
@@ -127,7 +128,12 @@ Landed this session: the runtime marker layer (`pyproject.toml` markers,
 shim lane (row 14), the `functional.yaml` matrix over both runtimes, the
 `golden-charms.yaml` docker pin (a weekly cost call), the borescope pin
 (row 20), and the justfile `JJX_RUNTIME` default so local runs pin docker
-unless the ambient variable overrides.
+unless the ambient variable overrides. From the PR's first CI run: the
+`@pytest.mark.docker` marks on the two fastapi golden tests (their inner
+suites urlopen container IPs, which rootless podman black-holes — row 35,
+confirmed live against `test_loki_data`), and the podman CI leg's subuid
+widening step (row 33, confirmed by the leg's `charm_user` failures on
+stock allocation).
 
 ## What I verified live
 
