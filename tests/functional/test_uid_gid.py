@@ -133,8 +133,10 @@ def wait_for_active(charm_dir: pathlib.Path) -> None:
 
 
 def _process_uid(runtime: str) -> str:
-    # Read the uvicorn process UID with docker top.
+    # Read the uvicorn process UID with <runtime> top.
     # The args column is requested so the uvicorn line is identifiable.
+    # Only callable when the workload runs as container UID 0: rootless
+    # Podman lists no processes for containers running as other users.
     result = subprocess.run(
         [
             runtime,
@@ -175,6 +177,7 @@ def remove_app(charm_dir: pathlib.Path) -> None:
     )
 
 
+@pytest.mark.docker
 def test_no_uid_gid_runs_as_image_user(charm_dir):
     # Backstop: the stored charm declares no uid/gid.
     assert read_uid_gid(charm_dir) == (None, None)
