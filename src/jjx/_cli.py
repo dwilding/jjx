@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -28,6 +29,7 @@ from . import (
     _cmd_status,
     _cmd_wait_for,
     _engine,
+    _port_scan,
 )
 
 
@@ -254,6 +256,45 @@ def jjx_pytest_args(charm_root: Path, cli_extra_args: list[str] | None = None) -
         raise _engine.CliError("Error: [tool.jjx].pytest-extra-args must be an array of strings.")
 
     return [*default_args, *extra_args, *cli_args]
+
+
+_JUNIT_ARG_NAMES = ("--junit-xml", "--junitxml")
+
+
+def _has_junit_arg(pytest_args: list[str]) -> bool:
+    """Return whether the pytest args name a JUnit report, even a broken one."""
+    return any(
+        arg in _JUNIT_ARG_NAMES or arg.startswith(("--junit-xml=", "--junitxml="))
+        for arg in pytest_args
+    )
+
+
+def _junit_path_from_args(pytest_args: list[str], charm_root: Path) -> Path | None:
+    """Return the JUnit report path named in the pytest args, if one is namable.
+
+    Both spellings (--junit-xml, --junitxml) and both value forms (two-token
+    and =) are honored; the path is resolved against the charm root, matching
+    pytest, which runs with the charm root as its cwd. A dangling flag names
+    no path and returns None, leaving pytest to reject it.
+    """
+    for i, arg in enumerate(pytest_args):
+        if arg in _JUNIT_ARG_NAMES and i + 1 < len(pytest_args):
+            return charm_root / pytest_args[i + 1]
+        if arg.startswith(("--junit-xml=", "--junitxml=")):
+            return charm_root / arg.split("=", 1)[1]
+    return None
+
+
+def _test_dir_from_args(pytest_args: list[str], charm_root: Path) -> Path | None:
+    """Return the first positional test target in the pytest args, if any.
+
+    jjx's built-in defaults put the test directory first, so this is the
+    directory the tests pytest runs come from.
+    """
+    for arg in pytest_args:
+        if not arg.startswith("-"):
+            return charm_root / arg
+    return None
 
 
 def _has_pytest_jubilant(charm_root: Path) -> bool:
@@ -485,6 +526,25 @@ def jjx_cli() -> int:
         # Ctrl-C during preflight: nothing has been created yet.
         return 130  # Standard exit code for SIGINT
 
+    # Port detection reads the integration tests for dialed port literals and
+    # cross-references them against the JUnit report pytest writes during the
+    # run. -p publishes a port of the user's choosing, so detection is skipped
+    # entirely. A report path already in the args wins and is never removed —
+    # including a dangling flag naming no path, which pytest itself rejects as
+    # it would without jjx. Otherwise jjx appends its own report path under
+    # .jjx/ and removes it in the finally below.
+    junit_path: Path | None = None
+    junit_owned = False
+    tests_dir: Path | None = None
+    if not publish:
+        tests_dir = _test_dir_from_args(pytest_args, charm_root)
+        junit_path = _junit_path_from_args(pytest_args, charm_root)
+        if junit_path is None and not _has_junit_arg(pytest_args):
+            junit_path = charm_root / _engine.STATE_DIR_NAME / "junit.xml"
+            junit_path.parent.mkdir(parents=True, exist_ok=True)
+            pytest_args.append(f"--junit-xml={junit_path}")
+            junit_owned = True
+
     placeholder_charm = charm_root / "placeholder.charm"
     placeholder_charm.touch()
 
@@ -523,10 +583,18 @@ def jjx_cli() -> int:
             teardown_all_models()
             return returncode
         if publish:
-            workload_line = f"Workload running at 127.0.0.1:{external_port}"
+            print(f"\nWorkload running at 127.0.0.1:{external_port}", flush=True)
         else:
-            workload_line = f"Workload running at {container.ip_address}"
-        print(f"\n{workload_line}", flush=True)
+            # The ports dialed by the last passing test that dialed any
+            # literal, read from the tests' ASTs and the JUnit report. Nothing
+            # detectable: today's IP-only line, byte for byte.
+            ports = _port_scan.detected_ports(tests_dir, junit_path)
+            if ports:
+                print(flush=True)
+                for port in sorted(ports):
+                    print(f"Workload running at {container.ip_address}:{port}", flush=True)
+            else:
+                print(f"\nWorkload running at {container.ip_address}", flush=True)
         # List user-facing endpoints for virtual COS charms (loki, etc.)
         # so the user can interact with them directly.
         cos_lines = _cos_endpoint_lines()
@@ -553,3 +621,13 @@ def jjx_cli() -> int:
         # Safety net: remove the placeholder even when the run ends by
         # exception, so no stray .charm file is ever left behind.
         placeholder_charm.unlink(missing_ok=True)
+        # Also the JUnit report jjx asked pytest to write, and the .jjx/
+        # directory jjx created for it — unless a detaching run left state
+        # behind, which 'jjx down' owns. A user-supplied report (junit_owned
+        # is False) is never jjx's to remove.
+        if junit_owned:
+            assert junit_path is not None
+            junit_path.unlink(missing_ok=True)
+            state_dir = charm_root / _engine.STATE_DIR_NAME
+            if not (state_dir / _engine.STATE_FILE_NAME).exists():
+                shutil.rmtree(state_dir, ignore_errors=True)
