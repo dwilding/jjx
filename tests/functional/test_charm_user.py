@@ -2,6 +2,7 @@ import pathlib
 import shutil
 import subprocess
 
+import helpers_functional as helpers
 import pytest
 
 import jjx
@@ -29,8 +30,8 @@ DEPLOY = [
 
 @pytest.fixture
 def charm_dir():
-    # Copy the charm under the package tree, not /tmp (see AGENTS.md). Each test
-    # mutates charmcraft.yaml, so it needs its own copy.
+    # Copy the charm under the package tree, not /tmp. See AGENTS.md.
+    # Each test mutates charmcraft.yaml, so it needs its own copy.
     root = PACKAGE_DIR / ".tmp" / "test_charm_user"
     shutil.rmtree(root, ignore_errors=True)
     charm = root / "k8s-2-configurable"
@@ -129,8 +130,8 @@ def remove_app(charm_dir: pathlib.Path) -> None:
 
 
 def run_jjx(charm_dir: pathlib.Path, *args: str) -> subprocess.CompletedProcess[str]:
-    # Run the full jjx CLI the way a user does. Detach (-d) so jjx exits after
-    # the run instead of waiting for Ctrl-C.
+    # Run the full jjx CLI the way a user does.
+    # Detach so jjx exits after the run instead of waiting for Ctrl-C.
     command = [
         "uvx",
         "--with-editable",
@@ -175,8 +176,8 @@ def test_charm_user_non_root_runs_170(charm_dir):
             f"juju deploy exited with code {result.returncode}\n"
             f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
-        # The non-root row is silent: no jjx warning on stderr. (uv prints its
-        # own unrelated warnings, so match the message, not the word.)
+        # The non-root row is silent: no jjx warning on stderr.
+        # uv prints its own unrelated warnings, so match the message, not the word.
         assert "charm-user is not set" not in result.stderr
         # The charm runner runs as 170:170.
         assert_runner_user(CHARM_RUNNER_NAME, "170:170")
@@ -196,8 +197,6 @@ def test_charm_user_root_fails(charm_dir):
     assert result.returncode != 0
     assert "charm-user 'root' is not supported" in result.stderr
     # No containers were created.
-    import helpers_functional as helpers
-
     helpers.assert_no_container(CHARM_RUNNER_NAME)
 
 
@@ -209,8 +208,6 @@ def test_charm_user_sudoer_fails(charm_dir):
     assert result.returncode != 0
     assert "charm-user 'sudoer' is not supported" in result.stderr
     # No containers were created.
-    import helpers_functional as helpers
-
     helpers.assert_no_container(CHARM_RUNNER_NAME)
 
 

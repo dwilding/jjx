@@ -1,4 +1,3 @@
-import os
 import pathlib
 import shutil
 import subprocess
@@ -32,8 +31,8 @@ DEPLOY = [
 
 @pytest.fixture
 def charm_dir():
-    # Copy the charm under the package tree, not /tmp (see AGENTS.md). Each test
-    # mutates charmcraft.yaml, so it needs its own copy.
+    # Copy the charm under the package tree, not /tmp. See AGENTS.md.
+    # Each test mutates charmcraft.yaml, so it needs its own copy.
     root = PACKAGE_DIR / ".tmp" / "test_uid_gid"
     shutil.rmtree(root, ignore_errors=True)
     charm = root / "k8s-2-configurable"
@@ -133,41 +132,9 @@ def wait_for_active(charm_dir: pathlib.Path) -> None:
     )
 
 
-def service_user_uid(service: str) -> str:
-    # Ask Pebble for the service state, then resolve the numeric UID with
-    # docker top (the chiseled image has no ps).
-    runtime = jjx.container_runtime()
-    result = subprocess.run(
-        [
-            runtime,
-            "exec",
-            CONTAINER_NAME,
-            "/charm/bin/pebble",
-            "services",
-        ],
-        capture_output=True,
-        text=True,
-        env={
-            **os.environ,
-            "PEBBLE": "/jjx/pebble",
-            "PEBBLE_SOCKET": "/jjx/socket",
-        },
-        check=False,
-    )
-    assert result.returncode == 0, (
-        f"pebble services exited with code {result.returncode}\n"
-        f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-    )
-    # The service must be up for its user to be observable.
-    line = next(line for line in result.stdout.splitlines() if line.startswith(service))
-    current = line.split()[2] if len(line.split()) > 2 else ""
-    assert current == "active", f"service {service} is {current!r}, expected 'active'"
-    return _process_uid(runtime)
-
-
 def _process_uid(runtime: str) -> str:
-    # Read the uvicorn process UID with docker top, requesting the args column
-    # so the uvicorn line is identifiable.
+    # Read the uvicorn process UID with docker top.
+    # The args column is requested so the uvicorn line is identifiable.
     result = subprocess.run(
         [
             runtime,
@@ -219,9 +186,9 @@ def test_no_uid_gid_runs_as_image_user(charm_dir):
             f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
         wait_for_active(charm_dir)
-        # The image declares user 584792 (_daemon_), so the service runs as it.
+        # The image declares user 584792, so the service runs as it.
         uid = _process_uid(jjx.container_runtime())
-        assert uid == "584792", f"service runs as UID {uid}, expected 584792 (_daemon_)"
+        assert uid == "584792", f"service runs as UID {uid}, expected 584792"
         # TEARDOWN
         remove_app(charm_dir)
     finally:
@@ -231,7 +198,7 @@ def test_no_uid_gid_runs_as_image_user(charm_dir):
 
 
 def test_uid_gid_zero_runs_as_root(charm_dir):
-    # Declare uid/gid 0 (the supervisor shape: root Pebble daemon).
+    # Declare uid/gid 0, the supervisor shape with a root Pebble daemon.
     set_uid_gid(charm_dir, 0, 0)
     # Deploy the app.
     result = deploy(charm_dir)
