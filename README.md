@@ -1,6 +1,6 @@
-# jjx — Spin up K8s charms on Docker
+# jjx — Spin up K8s charms on Docker or Podman
 
-jjx is an **experimental** test adapter for [Juju charms](https://canonical.com/juju/charms-architecture). It lets you run a charm's workload as a Docker container, with the charm's integration tests acting like a Compose file.
+jjx is an **experimental** test adapter for [Juju charms](https://canonical.com/juju/charms-architecture). It lets you run a charm's workload as a container, with Docker or Podman, and with the charm's integration tests acting like a Compose file.
 
 ![jjx terminal demo](terminal.svg)
 
@@ -19,9 +19,15 @@ The charm can't be too complex. If it requires storage, multiple units, or other
 ## System requirements
 
 - **[uv](https://docs.astral.sh/uv/getting-started/installation/)** — To install on Ubuntu, run `sudo snap install astral-uv --classic`.
-- **[Docker](https://docs.docker.com/engine/install/)** — To install on Ubuntu, run `sudo snap install docker`.
+- **[Docker](https://docs.docker.com/engine/install/)** or **[Podman](https://podman.io/docs/installation)** — To install on Ubuntu, run `sudo snap install docker` or `sudo snap install podman`.
 
-By default, Docker commands require `sudo`, but jjx runs Docker commands as a regular user. To allow Docker commands, run `sudo usermod -aG docker $USER`, then log out and log in again.
+jjx uses Podman when both are installed: a machine with Podman chose rootless containers on purpose, while a machine with Docker often picked it up as a side effect of something else. Set `JJX_RUNTIME` to `docker` or `podman` to pin the choice.
+
+By default, Docker commands require `sudo`, but jjx runs Docker commands as a regular user. To allow Docker commands, run `sudo usermod -aG docker $USER`, then log out and log in again. Podman needs no such setup: it runs containers as your own user.
+
+**Podman user mapping:** rootless Podman maps container users into the ID ranges allocated for your user in `/etc/subuid` and `/etc/subgid`. The default allocation (100000–165535) covers jjx's charm runner (user 170), but not Ubuntu rock images, which chown their files to user 584792 (`_daemon_`). jjx's own fixture image, `ghcr.io/canonical/api_demo_server/api-demo-server`, is one. Pulling or running such an image fails with `insufficient UIDs or GIDs available in user namespace`. To widen the allocation, extend your entry in both files — for example `youruser:100000:1000000` — then run `podman system migrate`.
+
+**Podman caveat:** containers run rootless by default, so their IP addresses are not reachable from the host. When jjx prints an address that only works on a bridge network, it says so, and `-p` (publish) is the way to expose a port on the host.
 
 ## Demo
 
@@ -36,7 +42,7 @@ uvx jjx -- -m smoke
 
 We selected the smoke tests (the ones decorated `@pytest.mark.smoke`) because we want to minimize the footprint of what we're spinning up. The smoke tests deploy the charm and integrate it with a simulated PostgreSQL charm, producing containers for the workload and a database. The smoke tests don't deploy the observability apps the charm supports. Later in the demo we'll try jjx without `-m smoke`.
 
-For now, open a second terminal and play with the workload:
+For now, open a second terminal and play with the workload. On Docker:
 
 ```sh
 curl http://172.17.0.2:8000/names  # returns {"names":{}}
@@ -45,6 +51,14 @@ curl http://172.17.0.2:8000/names  # returns {"names":{"1":"elephant"}}
 ```
 
 You might need to use a different IP address — check the output of `uvx jjx`.
+
+On Podman the container IP is not host-reachable, so publish a port first. Run `uvx jjx -p 8000:8000 -- -m smoke`, then:
+
+```sh
+curl http://127.0.0.1:8000/names  # returns {"names":{}}
+curl -X POST -d 'name=elephant' http://127.0.0.1:8000/addname/
+curl http://127.0.0.1:8000/names  # returns {"names":{"1":"elephant"}}
+```
 
 For more detail about the workload, see [Study your application](https://canonical.com/juju/docs/ops/latest/tutorial/from-zero-to-hero-write-your-first-kubernetes-charm/study-your-application/) in the *zero to hero* K8s charm tutorial. Our charm is based on that tutorial.
 
@@ -91,7 +105,7 @@ In the charm dir:
 uvx jjx
 ```
 
-This runs the charm's integration tests and starts a Docker container for the workload — assuming the tests try to deploy a `.charm` file along with a workload image. See [How jjx works](#how-jjx-works).
+This runs the charm's integration tests and starts a container for the workload — assuming the tests try to deploy a `.charm` file along with a workload image. See [How jjx works](#how-jjx-works).
 
 The workload stays running until you press Ctrl-C.
 

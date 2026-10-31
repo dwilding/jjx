@@ -173,7 +173,15 @@ def _cos_endpoint_lines() -> list[str]:
         if s.display_name and s.display_name in endpoints
     ]
     specs_with_endpoints.sort(key=lambda x: x[0].teardown_priority)
-    return [f"{spec.display_name:<12} {url}" for spec, url in specs_with_endpoints]
+    lines = [f"{spec.display_name:<12} {url}" for spec, url in specs_with_endpoints]
+    if lines and not _engine.container_ips_host_reachable():
+        # The URLs above point at container IPs, which rootless Podman does
+        # not expose to the host. Prepend a caveat so the user is not left
+        # to curl a timeout.
+        lines.insert(
+            0, "(container IPs above are not reachable from the host under rootless Podman)"
+        )
+    return lines
 
 
 def jjx_pytest_env_args(charm_root: Path) -> list[str]:
@@ -527,6 +535,16 @@ def jjx_cli() -> int:
         else:
             workload_line = f"Workload running at {container.ip_address}"
         print(f"\n{workload_line}", flush=True)
+        if not publish and not _engine.container_ips_host_reachable():
+            # Rootless Podman NATs traffic through userspace (slirp4netns or
+            # pasta), so the container IP above is reachable from sibling
+            # containers but not from this shell. Say so instead of leaving
+            # the user to curl a timeout; -p publishes a port they can reach.
+            print(
+                "Container IPs are not reachable from the host under rootless Podman. "
+                "Run jjx with -p <host port>:<container port> to publish a host-reachable port.",
+                flush=True,
+            )
         # List user-facing endpoints for virtual COS charms (loki, etc.)
         # so the user can interact with them directly.
         cos_lines = _cos_endpoint_lines()

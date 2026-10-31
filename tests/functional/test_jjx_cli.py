@@ -9,6 +9,7 @@ import urllib.request
 import helpers_functional as helpers
 
 PACKAGE_DIR = pathlib.Path(__file__).parent.parent.parent
+REACHABLE = helpers.container_ips_host_reachable()
 
 
 def wait_for_output_line(proc: subprocess.Popen[str], text: str) -> str:
@@ -77,8 +78,14 @@ def test_uvx_jjx(k8s_2_configurable):
         status_line = wait_for_output_line(proc, "Workload running at ")
         _, _, container_ip = status_line.partition("Workload running at ")
         assert container_ip
-        assert_connection(f"http://{container_ip}:8000")
-        assert_no_connection("http://127.0.0.1:8000")
+        if REACHABLE:
+            # Docker and rootful Podman expose container IPs on the host.
+            assert_connection(f"http://{container_ip}:8000")
+            assert_no_connection("http://127.0.0.1:8000")
+        else:
+            # Rootless Podman cannot reach container IPs from the host, so
+            # jjx prints a caveat line after the workload line instead.
+            wait_for_output_line(proc, "not reachable from the host")
         assert not (k8s_2_configurable / "placeholder.charm").exists()
         assert_no_jjx_in_charm_venv(k8s_2_configurable)
         # TEARDOWN

@@ -18,4 +18,7 @@ jobs:
       - name: Run functional tests for golden charms
         env:
           UV_PYTHON: '3.11'
+          # Golden charms pull large images, so the weekly run pins one
+          # runtime instead of doubling the cost with a matrix.
+          JJX_RUNTIME: docker
         run: uvx --from rust-just@1.59.0 just golden
