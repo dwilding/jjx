@@ -40,9 +40,20 @@ PEBBLE_RELEASES_DOWNLOAD = "https://github.com/canonical/pebble/releases/downloa
 # Python. No shell, no Python, no Pebble — everything is bind-mounted.
 CHARM_RUNNER_IMAGE = "docker.io/ubuntu/dotnet-deps:8.0-24.04_stable"
 
-# The container runtime binary. Currently always "docker"; the future podman
-# PR will make this configurable (env var or detection).
-_CONTAINER_BINARY = "docker"
+
+# The container runtime. Podman is preferred when both are installed: a
+# machine with Podman chose rootless containers on purpose, while a machine
+# with Docker often picked it up as a side effect of something else. Set
+# JJX_RUNTIME to "docker" or "podman" to pin the choice on a machine that
+# has both; preflight rejects any other value.
+def _container_binary() -> str:
+    pinned = os.environ.get("JJX_RUNTIME", "").strip().lower()
+    if pinned in ("docker", "podman"):
+        return pinned
+    return "podman" if shutil.which("podman") else "docker"
+
+
+_CONTAINER_BINARY = _container_binary()
 
 
 @dataclass
@@ -445,6 +456,20 @@ def _sanitize_container_name(name: str) -> str:
 CHARM_RUNNER_USER = "170:170"
 
 
+def _shared_dir_group() -> str:
+    """Return the container GID whose writes into the shared state dirs stay host-owned.
+
+    The shared directories under .jjx are group-writable, and both containers
+    carry a supplemental group so 170/daemon files remain removable by the
+    host. Under Docker that is the host GID. Under rootless Podman the host
+    GID is outside the container's gid map, but container group 0 maps to the
+    host user's own group, which yields the same host-owned outcome.
+    """
+    if _CONTAINER_BINARY == "podman":
+        return "0"
+    return str(os.getgid())
+
+
 def _charm_runner_user() -> str:
     """Return the ``--user`` value for the charm runner container.
 
@@ -513,16 +538,22 @@ def _status_dict(
 
 
 def _check_docker_available() -> None:
-    """Fail fast with an actionable message if the Docker daemon is not reachable.
+    """Fail fast with an actionable message if the container runtime is not reachable.
 
-    Runs ``docker info`` so the user gets an immediate, clear error instead of a
+    Runs ``<runtime> info`` so the user gets an immediate, clear error instead of a
     confusing ``failed to connect to the docker API`` surfaced later from pytest.
-    Raises :class:`CliError` if the ``docker`` binary is missing or the daemon is
-    not running.
+    Raises :class:`CliError` if the runtime binary is missing or the daemon is
+    not running. The runtime is Podman when available, else Docker, unless
+    ``JJX_RUNTIME`` pins either name.
     """
+    pinned = os.environ.get("JJX_RUNTIME", "").strip().lower()
+    if pinned and pinned not in ("docker", "podman"):
+        raise CliError(
+            f"Error: Invalid JJX_RUNTIME {os.environ.get('JJX_RUNTIME')!r}: expected 'docker' or 'podman'."
+        )
     if shutil.which(_CONTAINER_BINARY) is None:
         raise CliError(
-            f"Error: '{_CONTAINER_BINARY}' not found on PATH. Install Docker and try again."
+            f"Error: '{_CONTAINER_BINARY}' not found on PATH. Install {_CONTAINER_BINARY} and try again."
         )
     try:
         subprocess.run(
@@ -533,8 +564,168 @@ def _check_docker_available() -> None:
         )
     except subprocess.CalledProcessError:
         raise CliError(
-            "Error: Docker is not running. Start the Docker daemon and try again."
+            f"Error: {_CONTAINER_BINARY} is not running. Start the {_CONTAINER_BINARY} daemon and try again."
         ) from None
+
+
+_CONTAINER_IPS_HOST_REACHABLE: bool | None = None
+
+
+def container_ips_host_reachable() -> bool:
+    """Report whether container IPs are reachable from the host.
+
+    Docker and rootful Podman both put a bridge interface on the host, so you
+    can open a connection straight to a container IP. Rootless Podman uses
+    userspace NAT instead (slirp4netns on Podman 4.x, pasta on newer
+    releases), so container IPs are reachable from inside the network stack
+    but not from the host. Use ``--publish`` on rootless Podman if you want
+    a host-reachable address. Caches the result; the host does not change
+    during the run.
+    """
+    global _CONTAINER_IPS_HOST_REACHABLE
+    if _CONTAINER_IPS_HOST_REACHABLE is not None:
+        return _CONTAINER_IPS_HOST_REACHABLE
+
+    if _CONTAINER_BINARY == "docker":
+        _CONTAINER_IPS_HOST_REACHABLE = True
+    else:
+        # Rootful Podman behaves like Docker: the container network stack
+        # runs in a user namespace but the bridge it creates is a real host
+        # interface. Rootless Podman has no host-side interface, so fall back
+        # to False, which errs toward honesty in the CLI messages, when the
+        # rootless probe fails or is inconclusive.
+        try:
+            proc = subprocess.run(
+                [_CONTAINER_BINARY, "info", "--format", "{{.Host.Security.Rootless}}"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+        except (OSError, subprocess.CalledProcessError):
+            _CONTAINER_IPS_HOST_REACHABLE = False
+        else:
+            _CONTAINER_IPS_HOST_REACHABLE = proc.stdout.strip().lower() != "true"
+
+    return _CONTAINER_IPS_HOST_REACHABLE
+
+
+# Image used to send HTTP requests from the bridge network when the host
+# cannot reach container IPs. busybox is a small image whose wget covers
+# plain GET and POST.
+HTTP_PROBE_IMAGE = "docker.io/library/busybox:stable"
+
+
+def _http_request_on_bridge(
+    url: str,
+    *,
+    post: bool = False,
+    timeout: float = 5.0,
+) -> subprocess.CompletedProcess[bytes]:
+    """Send an HTTP request from a short-lived container on the bridge network.
+
+    Rootless Podman gives each container its own network namespace with no
+    host-side interface, so the host cannot reach container IPs. A
+    short-lived container on the bridge network can; this runs busybox wget
+    there to GET the URL or POST to it.
+    """
+    _docker_pull_with_retry(HTTP_PROBE_IMAGE)
+    command = [
+        _CONTAINER_BINARY,
+        "run",
+        "--rm",
+        "--network",
+        "bridge",
+        HTTP_PROBE_IMAGE,
+        "wget",
+        "-q",
+        "-O",
+        "/dev/null" if post else "-",
+        "-T",
+        str(int(timeout)),
+    ]
+    if post:
+        command.extend(["--post-data=", url])
+    else:
+        command.append(url)
+    return subprocess.run(
+        command,
+        capture_output=True,
+        timeout=timeout + 30.0,
+        check=False,
+    )
+
+
+def http_get(url: str, timeout: float = 10.0) -> bytes:
+    """GET a URL and return the response body.
+
+    The request comes from the host when container IPs are host-reachable
+    (Docker, rootful Podman) and from a short-lived container on the bridge
+    network otherwise (rootless Podman).
+    """
+    if container_ips_host_reachable():
+        try:
+            with urlopen(url, timeout=timeout) as response:
+                return response.read()
+        except HTTPError as exc:
+            raise CliError(f"GET {url} failed: HTTP {exc.code} {exc.reason}") from None
+        except URLError as exc:
+            raise CliError(f"GET {url} failed: {exc.reason}") from None
+    result = _http_request_on_bridge(url, timeout=timeout)
+    if result.returncode != 0:
+        stderr = result.stderr.decode(errors="replace")
+        raise CliError(
+            f"GET {url} failed from the bridge network: {stderr.strip() or result.returncode}"
+        )
+    return result.stdout
+
+
+def http_post(url: str, timeout: float = 5.0) -> None:
+    """POST to a URL and discard the response body.
+
+    Routes the request like ``http_get``: from the host when container IPs
+    are host-reachable, else from a short-lived container on the bridge
+    network.
+    """
+    if container_ips_host_reachable():
+        try:
+            request = Request(url, method="POST")
+            with urlopen(request, timeout=timeout) as response:
+                response.read()
+        except HTTPError as exc:
+            raise CliError(f"POST {url} failed: HTTP {exc.code} {exc.reason}") from None
+        except URLError as exc:
+            raise CliError(f"POST {url} failed: {exc.reason}") from None
+    result = _http_request_on_bridge(url, post=True, timeout=timeout)
+    if result.returncode != 0:
+        stderr = result.stderr.decode(errors="replace")
+        raise CliError(
+            f"POST {url} failed from the bridge network: {stderr.strip() or result.returncode}"
+        )
+
+
+def _wait_for_http(
+    container_name: str,
+    description: str,
+    port: int,
+    path: str,
+    timeout: float = 60.0,
+) -> None:
+    """Poll a container's HTTP endpoint until it answers.
+
+    Routes each poll like ``http_get``: from the host when container IPs are
+    host-reachable, else from a short-lived container on the bridge network.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            details = _docker_container_details(container_name)
+            if details.running and details.ip_address:
+                http_get(f"http://{details.ip_address}:{port}{path}", timeout=5.0)
+                return
+        except CliError:
+            pass
+        time.sleep(1.0)
+    raise CliError(f"{description} did not become ready in {container_name}")
 
 
 def _docker_run(
@@ -615,8 +806,17 @@ def _docker_restart(container_name: str, timeout: float = 30.0) -> None:
 
 
 def _docker_rm(container_name: str) -> None:
+    # podman rm --force stops the container before removing it, waiting its
+    # full stop timeout (10s by default) on a container that ignores SIGTERM.
+    # Pass --time 0 so it SIGKILLs immediately, like docker rm --force does
+    # natively. Docker has no --time flag on rm, so the flag is runtime-
+    # conditional.
+    rm_cmd = [_CONTAINER_BINARY, "rm", "--force"]
+    if _CONTAINER_BINARY == "podman":
+        rm_cmd.extend(["--time", "0"])
+    rm_cmd.append(container_name)
     subprocess.run(
-        [_CONTAINER_BINARY, "rm", "--force", container_name],
+        rm_cmd,
         capture_output=True,
         text=True,
         check=False,
@@ -1037,9 +1237,9 @@ def _start_charm_runner(
             "PYTHONDONTWRITEBYTECODE": "1",
         },
         user=_charm_runner_user(),
-        # Give the charm runner the host group so its files in the shared
-        # state directories remain readable/removable by the host.
-        group_add=str(os.getgid()),
+        # Give the charm runner the shared-dir group so its files remain
+        # readable/removable by the host (see _shared_dir_group).
+        group_add=_shared_dir_group(),
         workdir="/charm",
         entrypoint=container_python,
         command=["-c", "import time; time.sleep(999999)"],

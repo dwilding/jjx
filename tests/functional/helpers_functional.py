@@ -1,9 +1,11 @@
 import json
 import subprocess
-import urllib.error
-import urllib.request
 
 import jjx
+
+
+def container_ips_host_reachable() -> bool:
+    return jjx.container_ips_host_reachable()
 
 
 def assert_container(container_name: str) -> None:
@@ -16,6 +18,12 @@ def assert_container(container_name: str) -> None:
         command,
         check=True,
     )
+
+
+def fetch_dict(url: str, timeout: float = 10.0) -> dict:
+    # With rootless Podman the host cannot reach container IPs, so the fetch
+    # goes from the bridge network instead (jjx.http_get routes it).
+    return json.loads(jjx.http_get(url, timeout=timeout))
 
 
 def assert_no_container(container_name: str) -> None:
@@ -108,8 +116,3 @@ def container_ip(container_name: str) -> str:
         f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
     return result.stdout.strip()
-
-
-def fetch_dict(url: str, timeout: float = 10.0) -> dict:
-    with urllib.request.urlopen(url, timeout=timeout) as response:
-        return json.loads(response.read())

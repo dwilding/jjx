@@ -10,6 +10,20 @@ import jjx
 PACKAGE_DIR = pathlib.Path(__file__).parent.parent.parent
 CHARMS_DIR = pathlib.Path(__file__).parent / "charms"
 
+RUNTIME_PIN = os.environ.get("JJX_RUNTIME", "").strip().lower() or "docker"
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    # Skip runtime-marked tests whose runtime is not the pinned one: a
+    # machine normally has Docker or Podman installed, not both. Unmarked
+    # tests run either way, and a test marked both ways never runs.
+    for item in items:
+        markers = {marker.name for marker in item.own_markers}
+        if markers & {"docker", "podman"} and RUNTIME_PIN not in markers:
+            item.add_marker(
+                pytest.mark.skip(reason=f"JJX_RUNTIME={RUNTIME_PIN}, not marked for this runtime")
+            )
+
 
 @pytest.fixture(scope="session", autouse=True)
 def uv_no_config():

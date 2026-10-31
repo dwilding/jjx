@@ -110,6 +110,10 @@ def start_postgres(
     container_id = _engine._docker_run(
         POSTGRES_IMAGE,
         container_name,
+        # See the Loki comment in _virtual_loki.py: pin the shared bridge so
+        # both runtimes land on the network where relation peers reach each
+        # other.
+        network="bridge",
         env={
             "POSTGRES_PASSWORD": postgres_password,
             # Don't pre-create any application database — the per-relation

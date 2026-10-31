@@ -246,6 +246,11 @@ def deploy(args: list[str], model: str | None) -> int:
     charm_path, app_name, resources = _parse_deploy_args(args)
     existing = model_state["apps"].get(app_name)
     if existing and existing.get("container_name"):
+        # Remove the stale charm runner before the stale workload it shares a
+        # network namespace with: podman rm --force fails on a container that
+        # dependent containers still use.
+        if existing.get("charm_runner_name"):
+            _engine._docker_rm(existing["charm_runner_name"])
         _engine._docker_rm(existing["container_name"])
 
     # Handle virtual bundles (e.g. cos-lite) — deploy multiple virtual charms.
@@ -349,7 +354,7 @@ def deploy(args: list[str], model: str | None) -> int:
         # The Pebble daemon writes into the shared state directories as the
         # workload user, so it needs the same group grant as the charm runner.
         # A root workload is unaffected; root needs no supplemental group.
-        group_add=str(os.getgid()),
+        group_add=_engine._shared_dir_group(),
         network="bridge",
         workdir="/plan",
         entrypoint="/charm/bin/pebble",
@@ -389,11 +394,13 @@ def deploy(args: list[str], model: str | None) -> int:
         state = _engine._load_state()
         app_state = state.get("models", {}).get(model_name, {}).get("apps", {}).get(app_name)
         if app_state:
-            # Teardown order: workload → charm runner.
-            if app_state.get("container_name"):
-                _engine._docker_rm(app_state["container_name"])
+            # Teardown order: charm runner → workload. The runner shares the
+            # workload's network namespace, and podman rm --force fails on a
+            # container that dependent containers still use.
             if app_state.get("charm_runner_name"):
                 _engine._docker_rm(app_state["charm_runner_name"])
+            if app_state.get("container_name"):
+                _engine._docker_rm(app_state["container_name"])
         raise
 
     state = _engine._load_state()
