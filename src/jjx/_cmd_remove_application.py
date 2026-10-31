@@ -29,14 +29,16 @@ def remove_application(args: list[str], model: str | None) -> int:
     if app_state is None:
         return 0
 
-    container_name = app_state.get("container_name")
-    if container_name:
-        _engine._docker_rm(container_name)
-
-    # Remove the charm runner container after the workload container.
+    # Remove the charm runner container before the workload container: the
+    # runner shares the workload's network namespace, and podman rm --force
+    # fails on a container that dependent containers still use.
     charm_runner_name = app_state.get("charm_runner_name")
     if charm_runner_name:
         _engine._docker_rm(charm_runner_name)
+
+    container_name = app_state.get("container_name")
+    if container_name:
+        _engine._docker_rm(container_name)
 
     _engine._append_log(model_state, f"application {app_name} removed")
     _engine._save_state(state)

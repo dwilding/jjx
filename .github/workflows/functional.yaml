@@ -11,13 +11,32 @@ permissions: {}
 jobs:
   functional:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Both runtimes ship on ubuntu-latest; the matrix pins each so the
+        # runtime-marked tests get a lane and the unmarked ones run under
+        # both.
+        runtime: [docker, podman]
+    name: functional (${{ matrix.runtime }})
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
       - name: Install uv
         uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
+      - name: Widen Podman ID mapping
+        # Fixture rock images chown files to UID 584792 (_daemon_); the
+        # runner's stock allocation (100000-165535) can't unpack them.
+        # Mirror README's "Podman user mapping" guidance.
+        if: matrix.runtime == 'podman'
+        run: |
+          sudo sed -i "/^$USER:/d" /etc/subuid /etc/subgid
+          echo "$USER:100000:1000001" | sudo tee -a /etc/subuid >/dev/null
+          echo "$USER:100000:1000001" | sudo tee -a /etc/subgid >/dev/null
+          podman system migrate
       - name: Run functional tests
         env:
           UV_PYTHON: '3.11'
+          JJX_RUNTIME: ${{ matrix.runtime }}
         run: uvx --from rust-just@1.59.0 just functional

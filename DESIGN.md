@@ -16,7 +16,7 @@ Optional flags:
 
 - `-p HOST:CONTAINER` — publish a container port to `127.0.0.1:HOST`
 
-`jjx` handles the full lifecycle: preflight cleanup of any stale state, a Docker availability check, creating and removing the placeholder charm artifact, invoking pytest, and tearing down on exit. After pytest finishes, `jjx` checks whether the charm's workload container is running (virtual charm containers don't count). If it is, `jjx` waits for Ctrl-C (or detaches with `-d`); if not, `jjx` tears down all models and exits.
+`jjx` handles the full lifecycle: preflight cleanup of any stale state, a container runtime availability check, creating and removing the placeholder charm artifact, invoking pytest, and tearing down on exit. After pytest finishes, `jjx` checks whether the charm's workload container is running (virtual charm containers don't count). If it is, `jjx` waits for Ctrl-C (or detaches with `-d`); if not, `jjx` tears down all models and exits.
 
 jjx's own errors and warnings share one format: an `Error: ` or `Warning: ` prefix, a capitalized first word unless that word is a proper name (`charm-user`, `pytest-jubilant`), and a trailing period. The `juju` shim's messages are outside this rule. They follow real Juju's shapes, because jubilant carries their stderr verbatim into the exceptions it raises.
 
@@ -76,7 +76,7 @@ Supported:
 - deploy via a `.charm` argument interpreted as a trigger to run local `./src`
 - config updates and status reporting
 - hook tools needed by the charm
-- real Pebble in Docker
+- real Pebble in a container (the real binary, running as the workload's service manager)
 - relations with virtual charms (see below)
 - multiple models (e.g. a charm model and a COS model)
 - cross-model relations via `juju offer` and `juju integrate <model>.<app>`
@@ -108,7 +108,7 @@ Currently supported:
 
 Virtual bundles (e.g. `cos-lite`) deploy multiple virtual charms in one `juju deploy` command.
 
-Virtual charm containers are named `<model>-<app>` and are cleaned up on model teardown. The real charm's workload container is named `<model>-<container>` (using the container name from `charmcraft.yaml`, not the app name). Teardown order is determined by each charm's `teardown_priority`: COS containers (grafana=10, prometheus=20, loki=30) are removed first, then postgres (40), workload (50), and charm runners (60).
+Virtual charm containers are named `<model>-<app>` and are cleaned up on model teardown. The real charm's workload container is named `<model>-<container>` (using the container name from `charmcraft.yaml`, not the app name). Teardown order is determined by each charm's `teardown_priority`: COS containers (grafana=10, prometheus=20, loki=30) are removed first, then postgres (40), then the charm runner (45) and its workload (50). The charm runner precedes the workload because podman refuses to remove a container that a dependent container still uses, and the runner shares the workload's network namespace.
 
 ## runtime model
 
@@ -116,7 +116,11 @@ Virtual charm containers are named `<model>-<app>` and are cleaned up on model t
 
 State is local to the project working directory.
 
-Charm code is executed from `./src/` inside a persistent Docker container (the "charm runner") that shares the workload container's network namespace. The Python interpreter is bind-mounted from the host `uv` environment.
+Charm code is executed from `./src/` inside a persistent container (the "charm runner") that shares the workload container's network namespace. The Python interpreter is bind-mounted from the host `uv` environment.
+
+The container runtime is Podman when `podman` is on PATH, else Docker. Set `JJX_RUNTIME` to `docker` or `podman` to pin the choice on a machine that has both; the preflight rejects any other value. jjx prefers Podman when both are installed: a machine with Podman chose rootless containers on purpose, while a machine with Docker often picked it up as a side effect of something else. jjx uses only CLI-compatible subcommands (`run`, `exec`, `inspect`, `ps`, `pull`, `rm`, `create`, `restart`), so the same code drives either. Docker-specific flags are avoided except where noted. The two behavioral switches are the shared-directory group (see "container users") and reachability: Docker and rootful Podman put a bridge interface on the host, so container IPs answer from the host; rootless Podman runs the network stack inside a user namespace with no host-side interface, so container IPs answer only from inside the container network.
+
+The reachability gap shapes three decisions. First, virtual charm containers pass `network=bridge` explicitly: Docker defaults to the bridge network anyway, but rootless Podman defaults new containers to a private slirp network where no peer can reach them, and the bridge network keeps relation peers (workload to COS, workload to postgres) connected. Second, readiness polls on virtual charms come from a short-lived busybox container on the bridge network when the host cannot reach container IPs, not from the host. Third, the CLI prints a caveat when the address it reports is not host-reachable, and `--publish` is the supported way to expose a port on the host.
 
 The `.charm` file passed to deploy is a trigger only. `jjx` does not inspect or extract it.
 
@@ -146,7 +150,7 @@ Virtual charms are exempt: they have no charmcraft.yaml and no charm code, so th
 
 The `jjx` CLI enforces the gate at preflight, before pytest starts: `root`/`sudoer` fail with a clean error, and unset prints the warning. Deploy re-checks as a backstop for direct shim use, but its message would otherwise be lost — under `jjx` the deploy subprocess runs inside the pytest tree, whose stderr capture turns a deploy-time failure into tracebacks from every test instead of one clean error.
 
-Two mechanisms make the 170 runner work. First, Pebble's socket grants write access only to the daemon's own UID, root, or a seeded identity, so deploy passes `pebble run --identities` a file granting UID 170 admin access; without it the charm's Pebble writes are silently read-only. The file also grants the host user admin access. Host-side tools over `.jjx/socket` need it (borescope's `ps`, for example, uses the admin-only files API), and it grants nothing the host user doesn't already have: they create and destroy the containers and can `docker exec` into them, so the socket was never a boundary against them. Second, UID 170 owns nothing on the host, so the shared state directories under `.jjx/` are group-writable and both containers run with the host group added, letting the runner and the workload's Pebble daemon write files the host can still read and remove.
+Two mechanisms make the 170 runner work. First, Pebble's socket grants write access only to the daemon's own UID, root, or a seeded identity, so deploy passes `pebble run --identities` a file granting UID 170 admin access; without it the charm's Pebble writes are silently read-only. The file also grants the host user admin access. Host-side tools over `.jjx/socket` need it (borescope's `ps`, for example, uses the admin-only files API), and it grants nothing the host user doesn't already have: they create and destroy the containers and can `docker exec` into them, so the socket was never a boundary against them. Second, UID 170 owns nothing on the host, so the shared state directories under `.jjx/` are group-writable and both containers run with a supplemental group, letting the runner and the workload's Pebble daemon write files the host can still read and remove. Under Docker the supplemental group is the host GID; under rootless Podman the host GID is outside the container's gid map, so the containers add container group 0 instead, which maps to the host user's own group and yields the same host-owned outcome.
 
 ## filesystem contract
 
@@ -178,7 +182,7 @@ When a model is torn down, jjx kills any background pebble-ready processes for t
 
 ### charm runner container
 
-The charm runner is a persistent Docker container that executes charm hooks.
+The charm runner is a persistent container that executes charm hooks.
 
 **Image**: `docker.io/ubuntu/dotnet-deps:8.0-24.04_stable` — a chiseled Ubuntu image containing only the runtime libraries (glibc, libssl, libz, ca-certs) needed to run Python. No shell, no coreutils, no Python, no Pebble — everything is bind-mounted from the host. Because there is no `/bin/sh`, hook tool scripts use a direct Python shebang (`#!/python/bin/python3.XX`) rather than `#!/bin/sh`.
 
@@ -227,7 +231,7 @@ Deploy flow:
    - Pebble is started with `run --hold --create-dirs --identities /jjx/pebble/identities.yaml` so baked-in layers (e.g. Rockcraft layers with `startup: enabled`) do not autostart services before the charm's pebble-ready hook fires — matching real Juju, which also uses `--hold`. The identities file grants UID 170 admin access (see "container users" above).
    - the workload container runs with `--user <uid>:<gid>` when the charm declares them, otherwise at the image's declared user, or root if the image declares none
    - if `JJX_PUBLISH` is set to `HOST_PORT:CONTAINER_PORT`, add port publish `127.0.0.1:HOST_PORT:CONTAINER_PORT`
-   - the workload container's IP is stored in `state.json` as `container_ip` so hook tools (e.g. `network-get`) can access it without calling Docker directly
+   - the workload container's IP is stored in `state.json` as `container_ip` so hook tools (for example, `network-get`) can access it without calling the container runtime directly
 5. start charm runner container (`--network=container:<workload>`, running as `170:170`, bind-mounts for Python, venv, jjx source, charm dir, state dir) — its image is pre-pulled the same way
 6. wait for Pebble socket (`/jjx/socket`) to be connectable inside charm runner
 7. generate hook tool scripts in `./.jjx/hook-tools/` (Python scripts with `#!/python/bin/python3.XX` shebangs)
@@ -260,11 +264,11 @@ would deadlock on hook tool subprocesses.
 
 ### image pull retries
 
-All Docker image pulls (charm runner, workload, and virtual charm images) go
+All container image pulls (charm runner, workload, and virtual charm images) go
 through `_docker_pull_with_retry` in `src/jjx/_engine.py`, which retries
-`docker pull` up to 3 times with linear backoff (5s, then 10s) and skips images
+image pulls up to 3 times with linear backoff (5s, then 10s) and skips images
 already present locally. The Pebble binary download uses the same pattern. The
-pull is always separated from the run: jjx pre-pulls, then calls `docker run`
+pull is always separated from the run: jjx pre-pulls, then creates the container
 (which is not retried — retrying container creation would leave orphaned
 containers).
 
@@ -336,7 +340,7 @@ Implemented:
 - `juju-log` — appends to the model's log in `state.json`
 - `relation-ids`, `relation-list`, `relation-get`, `relation-set`, `relation-model-get` — relation data access
 - `secret-add`, `secret-get`, `secret-grant`, `secret-info-get`, `secret-ids`, `secret-remove`, `secret-revoke`, `secret-set` — secret management (see "secrets" below)
-- `network-get` — returns the workload container's IP address (from `state.json`, not Docker, since Docker isn't available inside the charm runner). All bindings resolve to the workload's IP.
+- `network-get` — returns the workload container's IP address (from `state.json`, not the container runtime, since the runtime isn't available inside the charm runner). All bindings resolve to the workload's IP.
 - `application-version-set` — sets the workload version in state
 - `action-get`, `action-set`, `action-fail`, `action-log` — action parameter access and result collection (see "actions" below)
 
@@ -372,9 +376,9 @@ When a charm calls `secret-get` with both an `id` and a `label`, jjx records the
 
 ## constraints
 
-- requires Docker
-- requires Docker socket access from the calling shell (for example via docker group membership)
-- requires Linux (Unix sockets + Docker `--network=container:` assumptions)
+- requires a container runtime: Docker or Podman
+- requires container socket access from the calling shell (for example via docker group membership, or rootless Podman in the user's own session)
+- requires Linux (Unix sockets + runtime `--network=container:` assumptions)
 - assumes charm source is present in `./src`
 - assumes charm metadata files are present in project
 
@@ -391,8 +395,8 @@ An earlier design used `bubblewrap` (a Linux sandboxing tool) to provide filesys
 We rejected it in favor of the charm runner container for three reasons:
 
 1. **Network fidelity**: `bubblewrap` is a filesystem sandbox, not a network proxy. It required a `sitecustomize.py` shim to rewrite outbound TCP connects from loopback addresses to the workload container's bridge IP. The charm runner's `--network=container:<workload>` shares the workload's network namespace directly, so loopback just works — no shim needed.
-2. **Operational complexity**: `bubblewrap` requires AppArmor configuration on some systems (notably GitHub Actions runners) to avoid permission errors. A Docker container has no such host-level configuration burden.
-3. **Consistency**: The charm runner is a Docker container, just like the workload and postgres containers. Using Docker for all containers simplifies the mental model and the teardown logic.
+2. **Operational complexity**: `bubblewrap` requires AppArmor configuration on some systems (notably GitHub Actions runners) to avoid permission errors. A container has no such host-level configuration burden.
+3. **Consistency**: The charm runner is a container, just like the workload and postgres containers. Using the container runtime for all containers simplifies the mental model and the teardown logic.
 
 ## design intent
 
