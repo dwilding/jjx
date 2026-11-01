@@ -16,6 +16,17 @@ Optional flags:
 
 - `-p HOST:CONTAINER` — publish a container port to `127.0.0.1:HOST`
 
+When a run's tests have passed, `jjx` prints the workload's address as `Workload running at <ip>:<port>`. The port comes from the last passing test that dialed a port literal, cross-referencing two inputs:
+
+- a scan of the integration tests, AST-based and function-scoped: the `:<port>` inside a string constant or the constant parts of an f-string, bounded by a URL start (`http://` or `https://`). The scanner reads the first positional test target in the final pytest args, which defaults to `tests/integration`.
+- the JUnit report pytest's built-in plugin writes during the run, read with stdlib `xml.etree.ElementTree`: a `<testcase>` passes if it has no `<failure>`, `<error>`, or `<skipped>` child. `jjx` appends `--junit-xml=<charm_root>/.jjx/junit.xml` unless the final args already name a report, in which case that path wins and is never removed. The report is transient: `jjx` removes the report it appended once the run is over.
+
+The last passing dialing test wins, and each port it dialed prints one line. A report file rather than a pytest plugin because a plugin would need `jjx` importable in the charm's integration environment — true in only two of the three launch modes (charm venv and local checkout) and false in tool installs, where the `juju` shim is a standalone script.
+
+The deliberate misses, each a silent degrade to the IP-only line (`Workload running at <ip>`): helpers computing a test's port, runtime-assembled URLs, and a run where no passing test dialed any literal. `-p` disables detection entirely — the user supplied the port themselves, so the scan, the JUnit argument, and the report read are all skipped.
+
+jjx reads only what the tests did. A test passing while its dial would fail is a test bug, not something jjx cross-checks against the workload.
+
 `jjx` handles the full lifecycle: preflight cleanup of any stale state, a Docker availability check, creating and removing the placeholder charm artifact, invoking pytest, and tearing down on exit. After pytest finishes, `jjx` checks whether the charm's workload container is running (virtual charm containers don't count). If it is, `jjx` waits for Ctrl-C (or detaches with `-d`); if not, `jjx` tears down all models and exits.
 
 jjx's own errors and warnings share one format: an `Error: ` or `Warning: ` prefix, a capitalized first word unless that word is a proper name (`charm-user`, `pytest-jubilant`), and a trailing period. The `juju` shim's messages are outside this rule. They follow real Juju's shapes, because jubilant carries their stderr verbatim into the exceptions it raises.
@@ -40,12 +51,13 @@ Arguments are assembled in this order:
 1. `jjx`'s built-in defaults (`tests/integration --no-juju-teardown -v`)
 2. `pytest-extra-args` from `pyproject.toml`
 3. extra args from the command line (after `--`)
+4. `--junit-xml=<charm_root>/.jjx/junit.xml`, unless an earlier arg already names a JUnit report — that path wins and the report is never removed afterwards
 
 Command-line args come last so they take precedence over `pyproject.toml` — matching the convention that command-line options override configuration file defaults. `jjx` always controls the test directory and teardown behavior; both `pytest-extra-args` and CLI args are appended after the built-in defaults. For full control, use `uv run` directly (see launch modes below).
 
 ## under the hood
 
-`jjx` invokes pytest via `uv run --group integration pytest tests/integration --no-juju-teardown -v [<pytest-extra-args>] [<cli-extra-args>]`. How `jjx` makes itself available to the inner `uv run` depends on how it was launched:
+`jjx` invokes pytest via `uv run --group integration pytest tests/integration --no-juju-teardown -v [<pytest-extra-args>] [<cli-extra-args>] [<junit-arg>]`, where `<junit-arg>` is `--junit-xml=<charm_root>/.jjx/junit.xml` unless the args already name a JUnit report (see port detection above). How `jjx` makes itself available to the inner `uv run` depends on how it was launched:
 
 - **Charm venv** (user added `jjx` to their charm's dependencies and runs `uv run jjx`): `--python <venv>` — pin uv to the current interpreter so the charm's existing venv (which already has `jjx`) is reused. This mode requires the charm's `requires-python` to be within jjx's range: uv resolves across the charm's full `requires-python` range.
 - **Local checkout** (developer running `uvx --with-editable <repo> jjx`): `--with-editable <path>` — install the same source into the inner venv.

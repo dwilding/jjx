@@ -1,4 +1,5 @@
 import pathlib
+import re
 import shutil
 import subprocess
 
@@ -46,6 +47,11 @@ def test_charmcraft_profile(temp_dir):
         assert result.returncode == 0, (
             f"jjx exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
+        workload_lines = [
+            line for line in result.stdout.splitlines() if line.startswith("Workload running at ")
+        ]
+        assert len(workload_lines) == 1
+        assert re.fullmatch(r"Workload running at \d+(?:\.\d+){3}", workload_lines[0])
         model_name = result.stdout.split("--juju-model ")[1].split()[0]
         container_names = [
             f"{model_name}-test-charm-operator",
@@ -211,6 +217,11 @@ def test_fastapi_demo(temp_dir):
         assert "Grafana" in result.stdout
         assert "Prometheus" in result.stdout
         assert "Loki API" in result.stdout
+        workload_lines = [
+            line for line in result.stdout.splitlines() if line.startswith("Workload running at ")
+        ]
+        assert len(workload_lines) == 1
+        assert re.fullmatch(r"Workload running at \d+(?:\.\d+){3}:8000", workload_lines[0])
         model_name = result.stdout.split("--juju-model ")[1].split()[0]
         container_names = [
             f"{model_name}-test-charm-operator",
