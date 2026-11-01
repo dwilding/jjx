@@ -95,7 +95,7 @@ This runs the charm's integration tests and starts a Docker container for the wo
 
 The workload stays running until you press Ctrl-C.
 
-The output shows the workload's IP address, and, when one of the passing integration tests dialed a port literal (for example `f"http://{unit_ip}:8000"`), the port too. You can play with the workload by connecting to this address. jjx reports the tests' verdict on which port the workload serves; it does not verify the port against the workload itself.
+The output shows the workload's IP address. You can play with the workload by connecting to this address. If the integration tests interacted with the workload, the output also shows which port to use when connecting to the workload.
 
 Alternatively, to play with the workload on localhost, specify a port mapping:
 
