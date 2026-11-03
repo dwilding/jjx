@@ -56,11 +56,10 @@ def _auto_publish_from_env() -> list[str]:
     """Return the publish specs jjx derives from the tests it is about to run.
 
     The environment carries the dialed port literal union from the pre-run scan
-    (set by jjx itself) plus the COS spec ports, as a sorted port list. Only
-    rootless Podman publishes this way: on Docker and rootful Podman the
-    container IP is host-reachable, so the run is untouched. Ports publish
-    identity-mapped (``127.0.0.1:<port>:<port>``) so the tests' own URLs need
-    no translating.
+    (set by jjx itself) as a sorted port list. Only rootless Podman publishes
+    this way: on Docker and rootful Podman the container IP is host-reachable,
+    so the run is untouched. Ports publish identity-mapped
+    (``127.0.0.1:<port>:<port>``) so the tests' own URLs need no translating.
     """
     raw = os.environ.get("JJX_AUTO_PUBLISH", "").strip()
     if not raw:

@@ -84,8 +84,9 @@ def start_grafana(
         # See the Loki comment: pin the shared bridge so both runtimes land
         # on the network where relation peers reach each other.
         network="bridge",
-        # See the Loki comment: auto-publish the spec port on rootless Podman.
-        publish=_engine._rootless_publish([3000]),
+        # See the Loki comment: auto-publish the spec port dynamically on
+        # rootless Podman; the allocated host port is recorded in host_port.
+        publish=_engine._rootless_publish([GRAFANA_PORT]),
         mounts=[(str(provisioning_dir), "/etc/grafana/provisioning", False)],
         env={
             "GF_SECURITY_ADMIN_USER": "admin",
@@ -107,6 +108,10 @@ def start_grafana(
         "ip_address": details.ip_address,
         "host": details.ip_address,
         "port": GRAFANA_PORT,
+        # Only set on rootless Podman: the loopback port the runtime
+        # allocated for the spec port. Host-facing URLs report this; the
+        # container-side port stays GRAFANA_PORT.
+        "host_port": _engine._published_host_port(container_name, GRAFANA_PORT),
         "provisioning_dir": str(provisioning_dir),
     }
 

@@ -120,10 +120,10 @@ def resolve_endpoint_url(
     With ``host_view`` the URL targets a caller on the host — the tests that
     compose URLs from ``show-proxied-endpoints`` output, or the user reading
     the COS endpoint lines. Rootless Podman cannot reach container IPs from
-    the host, and each COS container publishes its spec port identity-mapped
-    to the loopback, so the host view reports ``127.0.0.1`` there. The
-    default view keeps the container IP for every consumer inside the
-    model: relation databags and Grafana provisioning hand the URL to
+    the host; each COS container publishes its spec port to an allocated
+    loopback port, so the host view reports ``127.0.0.1`` and that port. The
+    default view keeps the container IP and port for every consumer inside
+    the model: relation databags and Grafana provisioning hand the URL to
     containers, where the loopback is that container, not the endpoint.
     """
     container_name = info.get("container_name", "")
@@ -145,6 +145,7 @@ def resolve_endpoint_url(
 
         if not _engine.container_ips_host_reachable():
             host = "127.0.0.1"
+            port = int(host_port) if (host_port := info.get("host_port")) else port
     if host:
         return f"http://{host}:{port}"
     return ""

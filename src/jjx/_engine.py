@@ -572,16 +572,49 @@ _CONTAINER_IPS_HOST_REACHABLE: bool | None = None
 
 
 def _rootless_publish(ports: list[int]) -> list[str]:
-    """Return identity-mapped publish specs for the ports, or [] when a bridge exists.
+    """Return dynamically-allocated publish specs for the ports, or [] when a bridge exists.
 
     On Docker and rootful Podman the bridge is host-reachable, container IPs
-    answer from the host, and no spec is needed. On rootless Podman every port
-    here publishes as ``127.0.0.1:<port>:<port>`` so the tests dials that named
-    it can round-trip from the host.
+    answer from the host, and no spec is needed. On rootless Podman each port
+    publishes as ``127.0.0.1::<port>`` — the runtime allocates the host port.
+    Read it back with ``_published_host_port`` and report it in any URL that
+    points a host-side caller here. The tests' dial literals are the one thing
+    jjx cannot rewrite, so the ports they name are identity-published on the
+    workload and win the well-known numbers; a COS publish is dynamic either
+    way, because one loopback port binds once and jjx fabricates every URL
+    that dials it.
     """
     if not ports or container_ips_host_reachable():
         return []
-    return [f"127.0.0.1:{port}:{port}" for port in ports]
+    return [f"127.0.0.1::{port}" for port in ports]
+
+
+def _published_host_port(container_name: str, container_port: int) -> int | None:
+    """Return the host port the container port is published to, or None.
+
+    Only rootless Podman publishes (see ``_rootless_publish``), and there the
+    host port is allocated by the runtime. The mapping survives container
+    restarts, so reading it once at deploy time is enough.
+    """
+    if container_ips_host_reachable():
+        return None
+    try:
+        proc = subprocess.run(
+            [_CONTAINER_BINARY, "port", container_name, str(container_port)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return None
+    for line in proc.stdout.splitlines():
+        host_address, separator, port = line.strip().rpartition(":")
+        if separator and host_address.startswith("127.0.0.1"):
+            try:
+                return int(port)
+            except ValueError:
+                return None
+    return None
 
 
 def container_ips_host_reachable() -> bool:
