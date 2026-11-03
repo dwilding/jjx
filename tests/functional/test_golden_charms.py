@@ -1,4 +1,5 @@
 import pathlib
+import re
 import shutil
 import subprocess
 
@@ -211,6 +212,9 @@ def test_fastapi_demo(temp_dir):
         assert "Grafana" in result.stdout
         assert "Prometheus" in result.stdout
         assert "Loki API" in result.stdout
+        # The charm's integration tests dial the workload, so a port should be detected.
+        workload_lines = re.findall(r"Workload running at \d+(?:\.\d+){3}:8000", result.stdout)
+        assert len(workload_lines) == 1
         model_name = result.stdout.split("--juju-model ")[1].split()[0]
         container_names = [
             f"{model_name}-test-charm-operator",
