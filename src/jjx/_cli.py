@@ -566,10 +566,10 @@ def jjx_cli() -> int:
     # the host, so jjx publishes every port the tests dial — identity-mapped,
     # so the tests' own URLs need no translating. The COS spec ports publish
     # on the COS containers themselves, from each spec's own registration, not
-    # here: the workload has no use for them, and a shared loopback port
-    # cannot bind twice. The same scan feeds detection. -p disables this,
-    # exactly as it disables detection: the user supplied the port, so jjx
-    # does not second-guess.
+    # here: the workload has no use for them. A COS port that collides with a
+    # dialed one slides to the next free loopback address, keeping its number.
+    # The same scan feeds detection. -p disables this, exactly as it disables
+    # detection: the user supplied the port, so jjx does not second-guess.
     if not publish and tests_dir is not None and not _engine.container_ips_host_reachable():
         dialed: set[int] = set()
         for ports in _port_scan.scan_test_ports(tests_dir).values():

@@ -80,8 +80,9 @@ def start_prometheus(
         # See the Loki comment: pin the shared bridge so both runtimes land
         # on the network where relation peers reach each other.
         network="bridge",
-        # See the Loki comment: auto-publish the spec port dynamically on
-        # rootless Podman; the allocated host port is recorded in host_port.
+        # See the Loki comment: publish on the first free loopback address on
+        # rootless Podman; the published endpoint is recorded in
+        # host_endpoint.
         publish=_engine._rootless_publish([PROMETHEUS_PORT]),
         mounts=[(str(config_dir), "/etc/prometheus", False)],
         tmpfs_mounts=["/prometheus:mode=1777"],
@@ -104,10 +105,10 @@ def start_prometheus(
         "ip_address": details.ip_address,
         "host": details.ip_address,
         "port": PROMETHEUS_PORT,
-        # Only set on rootless Podman: the loopback port the runtime
-        # allocated for the spec port. Host-facing URLs report this; the
+        # Only set on rootless Podman: the loopback address and port the
+        # spec port is published on. Host-facing URLs report this; the
         # container-side port stays PROMETHEUS_PORT.
-        "host_port": _engine._published_host_port(container_name, PROMETHEUS_PORT),
+        "host_endpoint": _engine._published_host_endpoint(container_name, PROMETHEUS_PORT),
         "config_dir": str(config_dir),
     }
 

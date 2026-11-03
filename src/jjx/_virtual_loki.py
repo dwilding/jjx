@@ -73,12 +73,11 @@ def start_loki(
         # to the bridge network already; pass it explicitly so both runtimes
         # land on the shared bridge, where relation peers reach each other.
         network="bridge",
-        # jjx auto-publishes the spec port dynamically on rootless Podman:
-        # every URL that dials it from the host comes from jjx's registry, so
-        # the allocated host port (recorded in host_port below) is reported
-        # there. Identity is reserved for the ports the tests dial, which jjx
-        # cannot rewrite — a workload that dials 3100 must win it, and COS
-        # can never collide by construction.
+        # On rootless Podman jjx publishes the spec port on the first free
+        # loopback address (see _engine._rootless_publish): the port keeps
+        # its number and the address disambiguates. Every URL that dials
+        # Loki from the host comes from jjx's registry, so the published
+        # endpoint (recorded in host_endpoint below) is reported there.
         publish=_engine._rootless_publish([LOKI_PORT]),
         # The image's default command is:
         #   /usr/bin/loki -config.file=/etc/loki/local-config.yaml
@@ -98,10 +97,10 @@ def start_loki(
         "ip_address": details.ip_address,
         "host": details.ip_address,
         "port": LOKI_PORT,
-        # Only set on rootless Podman: the loopback port the runtime
-        # allocated for the spec port. Host-facing URLs report this; the
+        # Only set on rootless Podman: the loopback address and port the
+        # spec port is published on. Host-facing URLs report this; the
         # container-side port stays LOKI_PORT.
-        "host_port": _engine._published_host_port(container_name, LOKI_PORT),
+        "host_endpoint": _engine._published_host_endpoint(container_name, LOKI_PORT),
     }
 
 

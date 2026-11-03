@@ -12,6 +12,7 @@ import os
 import re
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import tarfile
@@ -572,29 +573,76 @@ _CONTAINER_IPS_HOST_REACHABLE: bool | None = None
 
 
 def _rootless_publish(ports: list[int]) -> list[str]:
-    """Return dynamically-allocated publish specs for the ports, or [] when a bridge exists.
+    """Return publish specs for the ports on free loopback addresses, or [] on Docker.
 
     On Docker and rootful Podman the bridge is host-reachable, container IPs
-    answer from the host, and no spec is needed. On rootless Podman each port
-    publishes as ``127.0.0.1::<port>`` — the runtime allocates the host port.
-    Read it back with ``_published_host_port`` and report it in any URL that
-    points a host-side caller here. The tests' dial literals are the one thing
-    jjx cannot rewrite, so the ports they name are identity-published on the
-    workload and win the well-known numbers; a COS publish is dynamic either
-    way, because one loopback port binds once and jjx fabricates every URL
-    that dials it.
+    answer from the host, and no spec is needed. On rootless Podman the
+    loopback block is a /8 — 127.0.0.1 and 127.0.0.2 are different sockets —
+    so each port publishes on the first free address and keeps its number:
+    the address does the disambiguating that container IPs do on Docker. A
+    port the integration tests dial starts one address along, because the
+    tests dial literals that jjx cannot rewrite and 127.0.0.1 belongs to the
+    workload. Read the published address and port back with
+    ``_published_host_endpoint`` and report them in any URL that points a
+    host-side caller here.
     """
     if not ports or container_ips_host_reachable():
         return []
-    return [f"127.0.0.1::{port}" for port in ports]
+    dialed = _dialed_ports_from_env()
+    specs: list[str] = []
+    for port in ports:
+        address = _free_loopback_address(port, start_octet=2 if port in dialed else 1)
+        if address is None:
+            raise CliError(f"no free loopback address to publish port {port} on")
+        specs.append(f"{address}:{port}:{port}")
+    return specs
 
 
-def _published_host_port(container_name: str, container_port: int) -> int | None:
-    """Return the host port the container port is published to, or None.
+def _dialed_ports_from_env() -> set[int]:
+    """Return the ports the pre-run scan published for the tests to dial.
 
-    Only rootless Podman publishes (see ``_rootless_publish``), and there the
-    host port is allocated by the runtime. The mapping survives container
-    restarts, so reading it once at deploy time is enough.
+    ``_cmd_deploy`` re-reads this to build the workload's identity specs; the
+    COS virtuals read it to leave 127.0.0.1 free for the dialed numbers.
+    Empty outside a jjx run. Raises on a malformed value — jjx itself sets it.
+    """
+    raw = os.environ.get("JJX_AUTO_PUBLISH", "").strip()
+    if not raw:
+        return set()
+    ports: set[int] = set()
+    for token in raw.split():
+        try:
+            port = int(token)
+        except ValueError:
+            raise CliError(f"JJX_AUTO_PUBLISH has a non-port entry: {token!r}") from None
+        if not 1 <= port <= 65535:
+            raise CliError(f"JJX_AUTO_PUBLISH port out of range: {port}")
+        ports.add(port)
+    return ports
+
+
+def _free_loopback_address(port: int, start_octet: int) -> str | None:
+    """Return the first loopback address with nothing bound on the port.
+
+    Probing binds and closes without listening, so it sees busy listeners the
+    way a real publish would, and the address is free again immediately after
+    the probe.
+    """
+    for octet in range(start_octet, 256):
+        address = f"127.0.0.{octet}"
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+                probe.bind((address, port))
+        except OSError:
+            continue
+        return address
+    return None
+
+
+def _published_host_endpoint(container_name: str, container_port: int) -> tuple[str, int] | None:
+    """Return the (address, port) the container port is published to, or None.
+
+    Only rootless Podman publishes (see ``_rootless_publish``). The mapping
+    survives container restarts, so reading it once at deploy time is enough.
     """
     if container_ips_host_reachable():
         return None
@@ -608,10 +656,10 @@ def _published_host_port(container_name: str, container_port: int) -> int | None
     except OSError:
         return None
     for line in proc.stdout.splitlines():
-        host_address, separator, port = line.strip().rpartition(":")
-        if separator and host_address.startswith("127.0.0.1"):
+        address, separator, port = line.strip().rpartition(":")
+        if separator and address.startswith("127."):
             try:
-                return int(port)
+                return (address, int(port))
             except ValueError:
                 return None
     return None
