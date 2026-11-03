@@ -52,6 +52,30 @@ def _publish_from_env() -> str | None:
     return _parse_publish(raw)
 
 
+def _auto_publish_from_env() -> list[str]:
+    """Return the publish specs jjx derives from the tests it is about to run.
+
+    The environment carries the dialed port literal union from the pre-run scan
+    (set by jjx itself) as a sorted port list. Only rootless Podman publishes
+    this way: on Docker and rootful Podman the container IP is host-reachable,
+    so the run is untouched. Ports publish identity-mapped
+    (``127.0.0.1:<port>:<port>``) so the tests' own URLs need no translating.
+    """
+    raw = os.environ.get("JJX_AUTO_PUBLISH", "").strip()
+    if not raw:
+        return []
+    ports = []
+    for token in raw.split():
+        try:
+            port = int(token)
+        except ValueError:
+            raise _engine.CliError(f"JJX_AUTO_PUBLISH has a non-port entry: {token!r}") from None
+        if not 1 <= port <= 65535:
+            raise _engine.CliError(f"JJX_AUTO_PUBLISH port out of range: {port}")
+        ports.append(f"127.0.0.1:{port}:{port}")
+    return ports
+
+
 def _copy_image_pebble_layers(image: str, dest_layers_dir: Path) -> None:
     """Copy baked-in Pebble layers from an OCI image into the state directory.
 
@@ -246,6 +270,11 @@ def deploy(args: list[str], model: str | None) -> int:
     charm_path, app_name, resources = _parse_deploy_args(args)
     existing = model_state["apps"].get(app_name)
     if existing and existing.get("container_name"):
+        # Remove the stale charm runner before the stale workload it shares a
+        # network namespace with: podman rm --force fails on a container that
+        # dependent containers still use.
+        if existing.get("charm_runner_name"):
+            _engine._docker_rm(existing["charm_runner_name"])
         _engine._docker_rm(existing["container_name"])
 
     # Handle virtual bundles (e.g. cos-lite) — deploy multiple virtual charms.
@@ -334,12 +363,13 @@ def deploy(args: list[str], model: str | None) -> int:
         (str(jjx_dir), "/jjx", False),
     ]
     publish = _publish_from_env()
+    auto_publish = _auto_publish_from_env()
     container_id = _engine._docker_run(
         image,
         container_name,
         mounts=mounts,
         tmpfs_mounts=["/plan:mode=1777"],
-        publish=publish,
+        publish=[*([publish] if publish else []), *auto_publish],
         env={
             "PEBBLE": "/jjx/pebble",
             "PEBBLE_SOCKET": "/jjx/socket",
@@ -349,13 +379,16 @@ def deploy(args: list[str], model: str | None) -> int:
         # The Pebble daemon writes into the shared state directories as the
         # workload user, so it needs the same group grant as the charm runner.
         # A root workload is unaffected; root needs no supplemental group.
-        group_add=str(os.getgid()),
+        group_add=_engine._shared_dir_group(),
         network="bridge",
         workdir="/plan",
         entrypoint="/charm/bin/pebble",
         command=["run", "--hold", "--create-dirs", "--identities", "/jjx/pebble/identities.yaml"],
     )
     model_state["apps"][app_name]["container_id"] = container_id
+    model_state["apps"][app_name]["published_ports"] = sorted(
+        int(spec.rsplit(":", 2)[-1]) for spec in auto_publish
+    )
     # Store the workload container's IP address in state so hook tools
     # (e.g. network-get) can access it without calling docker directly,
     # which isn't available inside the charm runner container.
@@ -389,11 +422,13 @@ def deploy(args: list[str], model: str | None) -> int:
         state = _engine._load_state()
         app_state = state.get("models", {}).get(model_name, {}).get("apps", {}).get(app_name)
         if app_state:
-            # Teardown order: workload → charm runner.
-            if app_state.get("container_name"):
-                _engine._docker_rm(app_state["container_name"])
+            # Teardown order: charm runner → workload. The runner shares the
+            # workload's network namespace, and podman rm --force fails on a
+            # container that dependent containers still use.
             if app_state.get("charm_runner_name"):
                 _engine._docker_rm(app_state["charm_runner_name"])
+            if app_state.get("container_name"):
+                _engine._docker_rm(app_state["container_name"])
         raise
 
     state = _engine._load_state()

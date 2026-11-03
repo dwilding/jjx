@@ -30,13 +30,15 @@ def destroy_model(args: list[str]) -> int:
         _engine._kill_background_processes(app_name=app_name)
 
     # Collect containers grouped by teardown priority. Lower priority = removed
-    # first. The order is: COS containers (grafana=10, prometheus=20, loki=30)
-    # → postgres (40) → workload (50) → charm runners (60).
+    # first. The order is: COS containers (grafana=10, prometheus=20,
+    # loki=30) → postgres (40) → charm runner (45) → workload (50). The charm
+    # runner precedes the workload it shares a network namespace with: podman
+    # rm --force fails on a container that dependent containers still use.
     containers_by_priority: list[tuple[int, str]] = []
     for app_state in model_state.get("apps", {}).values():
         charm_runner_name = app_state.get("charm_runner_name")
         if charm_runner_name:
-            containers_by_priority.append((60, charm_runner_name))
+            containers_by_priority.append((45, charm_runner_name))
         container_name = app_state.get("container_name")
         if not container_name:
             continue

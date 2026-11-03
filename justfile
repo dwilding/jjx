@@ -1,5 +1,15 @@
 set ignore-comments
 
+set shell := ["bash", "-cu"]
+
+# Pin the container runtime for local test runs (docker or podman). The
+# functional conftest skips runtime-marked tests whose marker does not match
+# this value, and unmarked tests run either way. CI overrides it per matrix
+# leg so marked tests get a lane of their own.
+JJX_RUNTIME := env_var_or_default("JJX_RUNTIME", "docker")
+
+set export
+
 [private]
 default:
   @just --summary --unsorted

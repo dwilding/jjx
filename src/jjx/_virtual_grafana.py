@@ -16,9 +16,6 @@ from __future__ import annotations
 import base64
 import json
 import lzma
-import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -31,22 +28,19 @@ GRAFANA_PORT = 3000
 
 
 def _wait_for_grafana(container_name: str, timeout: float = 60.0) -> None:
-    """Wait until Grafana is ready to serve requests."""
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        try:
-            details = _engine._docker_container_details(container_name)
-            if not details.running or not details.ip_address:
-                time.sleep(1.0)
-                continue
-            url = f"http://{details.ip_address}:{GRAFANA_PORT}/api/health"
-            with urllib.request.urlopen(url, timeout=5.0) as response:
-                if response.status == 200:
-                    return
-        except (urllib.error.URLError, urllib.error.HTTPError, _engine.CliError):
-            pass
-        time.sleep(1.0)
-    raise _engine.CliError(f"grafana did not become ready in {container_name}")
+    """Wait until Grafana is ready to serve requests.
+
+    The poll comes from outside the Grafana image (see
+    ``_engine._wait_for_http``), so it works with images that ship no client
+    tools.
+    """
+    _engine._wait_for_http(
+        container_name,
+        "grafana",
+        GRAFANA_PORT,
+        "/api/health",
+        timeout=timeout,
+    )
 
 
 def start_grafana(
@@ -87,6 +81,13 @@ def start_grafana(
     container_id = _engine._docker_run(
         GRAFANA_IMAGE,
         container_name,
+        # See the Loki comment: pin the shared bridge so both runtimes land
+        # on the network where relation peers reach each other.
+        network="bridge",
+        # See the Loki comment: publish on the first free loopback address on
+        # rootless Podman; the published endpoint is recorded in
+        # host_endpoint.
+        publish=_engine._rootless_publish([GRAFANA_PORT]),
         mounts=[(str(provisioning_dir), "/etc/grafana/provisioning", False)],
         env={
             "GF_SECURITY_ADMIN_USER": "admin",
@@ -108,6 +109,10 @@ def start_grafana(
         "ip_address": details.ip_address,
         "host": details.ip_address,
         "port": GRAFANA_PORT,
+        # Only set on rootless Podman: the loopback address and port the
+        # spec port is published on. Host-facing URLs report this; the
+        # container-side port stays GRAFANA_PORT.
+        "host_endpoint": _engine._published_host_endpoint(container_name, GRAFANA_PORT),
         "provisioning_dir": str(provisioning_dir),
     }
 

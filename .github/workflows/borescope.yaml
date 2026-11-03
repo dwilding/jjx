@@ -11,6 +11,11 @@ permissions: {}
 jobs:
   borescope:
     runs-on: ubuntu-latest
+    env:
+      # Detection prefers Podman where both runtimes ship (ubuntu-latest),
+      # but these httpbin probes were written against Docker. Pin to match
+      # the pre-Podman behavior until the probes are checked under Podman.
+      JJX_RUNTIME: docker
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:

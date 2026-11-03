@@ -108,12 +108,23 @@ def _make_active_status() -> dict[str, Any]:
     return {"status": "active", "message": "", "status-data": {}}
 
 
-def resolve_endpoint_url(info: dict[str, Any], default_port: int) -> str:
+def resolve_endpoint_url(
+    info: dict[str, Any], default_port: int, *, host_view: bool = False
+) -> str:
     """Resolve the URL for a virtual charm's HTTP endpoint.
 
     Refreshes the container IP in case it changed since deploy time, then
     returns ``http://<ip>:<port>`` or empty string if the container is not
     running. Also mutates ``info`` to update the cached host/IP.
+
+    With ``host_view`` the URL targets a caller on the host — the tests that
+    compose URLs from ``show-proxied-endpoints`` output, or the user reading
+    the COS endpoint lines. Rootless Podman cannot reach container IPs from
+    the host; each COS container publishes its spec port on a loopback
+    address, so the host view reports the published address and port. The
+    default view keeps the container IP and port for every consumer inside
+    the model: relation databags and Grafana provisioning hand the URL to
+    containers, where the loopback is that container, not the endpoint.
     """
     container_name = info.get("container_name", "")
     host = info.get("host", "")
@@ -129,6 +140,14 @@ def resolve_endpoint_url(info: dict[str, Any], default_port: int) -> str:
                 info["ip_address"] = details.ip_address
         except Exception:  # noqa: BLE001, S110
             pass
+    if host and host_view:
+        from . import _engine
+
+        if not _engine.container_ips_host_reachable():
+            if host_endpoint := info.get("host_endpoint"):
+                host, port = host_endpoint
+            else:
+                host = "127.0.0.1"
     if host:
         return f"http://{host}:{port}"
     return ""

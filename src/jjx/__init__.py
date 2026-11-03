@@ -1,16 +1,16 @@
+# Register all virtual charms. This must happen before any command module
+# uses the registry. Importing here ensures registration on package import.
 from . import (
+    _engine,
     _virtual_grafana,
     _virtual_loki,
     _virtual_postgres,
     _virtual_prometheus,
     _virtual_traefik,
 )
-
-# Register all virtual charms. This must happen before any command module
-# uses the registry. Importing here ensures registration on package import.
 from . import _virtual_registry as _vr
 from ._cli import run_hook_tool
-from ._engine import _CONTAINER_BINARY
+from ._engine import _CONTAINER_BINARY, CliError
 from ._version import __version__
 
 _vr.register(
@@ -74,8 +74,19 @@ def container_runtime() -> str:
     return _CONTAINER_BINARY
 
 
+def container_ips_host_reachable() -> bool:
+    return _engine.container_ips_host_reachable()
+
+
+def http_get(url: str, timeout: float = 10.0) -> bytes:
+    return _engine.http_get(url, timeout=timeout)
+
+
 __all__ = [
+    "CliError",
     "__version__",
+    "container_ips_host_reachable",
     "container_runtime",
+    "http_get",
     "run_hook_tool",
 ]

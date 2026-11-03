@@ -45,11 +45,19 @@ def assert_server_state(port: int, expect_up: bool) -> None:
 
 def server_up(ip: str, port: int) -> bool:
     url = f"http://{ip}:{port}/version"
+    if helpers.container_ips_host_reachable():
+        try:
+            response = urllib.request.urlopen(url, timeout=2)
+        except Exception:  # noqa: BLE001
+            return False
+        return response.status == 200
+    # Rootless Podman: the host cannot reach container IPs, so jjx.http_get
+    # fetches from the bridge network (which the workload shares) instead.
     try:
-        response = urllib.request.urlopen(url, timeout=2)
-    except Exception:  # noqa: BLE001
+        jjx.http_get(url, timeout=2)
+    except jjx.CliError:
         return False
-    return response.status == 200
+    return True
 
 
 def test_container_processes(k8s_2_configurable):

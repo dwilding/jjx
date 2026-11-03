@@ -164,7 +164,7 @@ def _cos_endpoint_lines() -> list[str]:
             if spec is None or spec.display_name is None:
                 continue
             info = app_state.get(spec.info_key, {})
-            url = _virtual_registry.resolve_endpoint_url(info, spec.default_port)
+            url = _virtual_registry.resolve_endpoint_url(info, spec.default_port, host_view=True)
             if url:
                 endpoints[spec.display_name] = url
 
@@ -175,7 +175,10 @@ def _cos_endpoint_lines() -> list[str]:
         if s.display_name and s.display_name in endpoints
     ]
     specs_with_endpoints.sort(key=lambda x: x[0].teardown_priority)
-    return [f"{spec.display_name:<12} {url}" for spec, url in specs_with_endpoints]
+    lines = [f"{spec.display_name:<12} {url}" for spec, url in specs_with_endpoints]
+    # Under rootless Podman the URLs point at host loopback ports jjx
+    # published for these containers, so they answer from the host shell.
+    return lines
 
 
 def jjx_pytest_env_args(charm_root: Path) -> list[str]:
@@ -558,6 +561,21 @@ def jjx_cli() -> int:
     if publish:
         env["JJX_PUBLISH"] = publish
         external_port, _ = publish.split(":", 1)
+
+    # On rootless Podman the tests themselves cannot reach container IPs from
+    # the host, so jjx publishes every port the tests dial — identity-mapped,
+    # so the tests' own URLs need no translating. The COS spec ports publish
+    # on the COS containers themselves, from each spec's own registration, not
+    # here: the workload has no use for them. A COS port that collides with a
+    # dialed one slides to the next free loopback address, keeping its number.
+    # The same scan feeds detection. -p disables this, exactly as it disables
+    # detection: the user supplied the port, so jjx does not second-guess.
+    if not publish and tests_dir is not None and not _engine.container_ips_host_reachable():
+        dialed: set[int] = set()
+        for ports in _port_scan.scan_test_ports(tests_dir).values():
+            dialed.update(ports)
+        if dialed:
+            env["JJX_AUTO_PUBLISH"] = " ".join(str(port) for port in sorted(dialed))
     cmd = [
         "uv",
         "run",
@@ -582,6 +600,7 @@ def jjx_cli() -> int:
             print()  # separate the teardown output from the test report
             teardown_all_models()
             return returncode
+        workload_ip = container.ip_address
         if publish:
             print(f"\nWorkload running at 127.0.0.1:{external_port}", flush=True)
         else:
@@ -590,11 +609,30 @@ def jjx_cli() -> int:
             # detectable: today's IP-only line, byte for byte.
             ports = _port_scan.detected_ports(tests_dir, junit_path)
             if ports:
+                # Rootless Podman auto-published the dialed ports to the host
+                # loopback, identity-mapped, so a host-side caller reaches
+                # them there; the container IP answers from the model only.
+                if not _engine.container_ips_host_reachable():
+                    workload_ip = "127.0.0.1"
                 print(flush=True)
                 for port in sorted(ports):
-                    print(f"Workload running at {container.ip_address}:{port}", flush=True)
+                    print(f"Workload running at {workload_ip}:{port}", flush=True)
             else:
-                print(f"\nWorkload running at {container.ip_address}", flush=True)
+                print(f"\nWorkload running at {workload_ip}", flush=True)
+        if (
+            not publish
+            and not _engine.container_ips_host_reachable()
+            and workload_ip != "127.0.0.1"
+        ):
+            # Rootless Podman NATs traffic through userspace (slirp4netns or
+            # pasta), so the container IP above is reachable from sibling
+            # containers but not from this shell. Say so instead of leaving
+            # the user to curl a timeout; -p publishes a port they can reach.
+            print(
+                "Container IPs are not reachable from the host under rootless Podman. "
+                "Run jjx with -p <host port>:<container port> to publish a host-reachable port.",
+                flush=True,
+            )
         # List user-facing endpoints for virtual COS charms (loki, etc.)
         # so the user can interact with them directly.
         cos_lines = _cos_endpoint_lines()

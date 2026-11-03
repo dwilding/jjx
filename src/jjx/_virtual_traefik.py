@@ -54,7 +54,7 @@ def get_proxied_endpoints(model_state: dict[str, Any]) -> dict[str, dict[str, st
         if spec is None or spec.display_name is None:
             continue
         info = app_state.get(spec.info_key, {})
-        url = _virtual_registry.resolve_endpoint_url(info, spec.default_port)
+        url = _virtual_registry.resolve_endpoint_url(info, spec.default_port, host_view=True)
         if url:
             endpoints[f"{app_name}/0"] = {
                 "url": url,
