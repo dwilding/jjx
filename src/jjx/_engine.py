@@ -571,6 +571,19 @@ def _check_docker_available() -> None:
 _CONTAINER_IPS_HOST_REACHABLE: bool | None = None
 
 
+def _rootless_publish(ports: list[int]) -> list[str]:
+    """Return identity-mapped publish specs for the ports, or [] when a bridge exists.
+
+    On Docker and rootful Podman the bridge is host-reachable, container IPs
+    answer from the host, and no spec is needed. On rootless Podman every port
+    here publishes as ``127.0.0.1:<port>:<port>`` so the tests dials that named
+    it can round-trip from the host.
+    """
+    if not ports or container_ips_host_reachable():
+        return []
+    return [f"127.0.0.1:{port}:{port}" for port in ports]
+
+
 def container_ips_host_reachable() -> bool:
     """Report whether container IPs are reachable from the host.
 
@@ -733,7 +746,7 @@ def _docker_run(
     container_name: str,
     mounts: list[tuple[str, str, bool]] | None = None,
     tmpfs_mounts: list[str] | None = None,
-    publish: str | None = None,
+    publish: str | list[str] | None = None,
     env: dict[str, str] | None = None,
     user: str | None = None,
     workdir: str | None = None,
@@ -758,8 +771,8 @@ def _docker_run(
     if group_add:
         cmd.extend(["--group-add", group_add])
 
-    if publish:
-        cmd.extend(["--publish", publish])
+    for spec in [publish] if isinstance(publish, str) else (publish or []):
+        cmd.extend(["--publish", spec])
 
     for src, dst, read_only in mounts or []:
         mode = "ro" if read_only else "rw"
@@ -2021,6 +2034,13 @@ def _status_for_app(app_name: str, app_state: dict[str, Any]) -> dict[str, Any]:
             # The container may not be running yet; leave the address empty
             # rather than failing the status call entirely.
             unit_address = ""
+
+    # On rootless Podman jjx auto-publishes the ports the tests dial, and the
+    # container IP is not host-reachable. Report 127.0.0.1 in that case so the
+    # tests' dials against the status address round-trip from the host.
+    published = app_state.get("published_ports", [])
+    if published and not container_ips_host_reachable():
+        unit_address = "127.0.0.1"
 
     return {
         "charm": app_state.get("charm", "local:jjx"),

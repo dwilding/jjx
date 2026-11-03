@@ -80,6 +80,8 @@ def start_prometheus(
         # See the Loki comment: pin the shared bridge so both runtimes land
         # on the network where relation peers reach each other.
         network="bridge",
+        # See the Loki comment: auto-publish the spec port on rootless Podman.
+        publish=_engine._rootless_publish([9090]),
         mounts=[(str(config_dir), "/etc/prometheus", False)],
         tmpfs_mounts=["/prometheus:mode=1777"],
         command=[

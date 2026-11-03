@@ -27,7 +27,7 @@ By default, Docker commands require `sudo`, but jjx runs Docker commands as a re
 
 **Podman user mapping:** rootless Podman maps container users into the ID ranges allocated for your user in `/etc/subuid` and `/etc/subgid`. The default allocation (100000–165535) covers jjx's charm runner (user 170), but not Ubuntu rock images, which chown their files to user 584792 (`_daemon_`). jjx's own fixture image, `ghcr.io/canonical/api_demo_server/api-demo-server`, is one. Pulling or running such an image fails with `insufficient UIDs or GIDs available in user namespace`. To widen the allocation, extend your entry in both files — for example `youruser:100000:1000000` — then run `podman system migrate`.
 
-**Podman caveat:** containers run rootless by default, so their IP addresses are not reachable from the host. When jjx prints an address that only works on a bridge network, it says so, and `-p` (publish) is the way to expose a port on the host.
+**Podman caveat:** containers run rootless by default, so their IP addresses are not reachable from the host. Before the run jjx publishes every port your integration tests dial to `127.0.0.1` — identity-mapped, so the addresses the tests see keep working — and it prints the loopback addresses in its output. A port no test dials stays unreachable; `-p` (publish) remains the way to expose one yourself, and it disables the auto-publish.
 
 ## Demo
 

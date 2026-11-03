@@ -84,6 +84,8 @@ def start_grafana(
         # See the Loki comment: pin the shared bridge so both runtimes land
         # on the network where relation peers reach each other.
         network="bridge",
+        # See the Loki comment: auto-publish the spec port on rootless Podman.
+        publish=_engine._rootless_publish([3000]),
         mounts=[(str(provisioning_dir), "/etc/grafana/provisioning", False)],
         env={
             "GF_SECURITY_ADMIN_USER": "admin",

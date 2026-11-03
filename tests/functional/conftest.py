@@ -16,7 +16,8 @@ RUNTIME_PIN = os.environ.get("JJX_RUNTIME", "").strip().lower() or "docker"
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     # Skip runtime-marked tests whose runtime is not the pinned one: a
     # machine normally has Docker or Podman installed, not both. Unmarked
-    # tests run either way, and a test marked both ways never runs.
+    # tests run either way, and a test marked both ways runs on both: the
+    # marks are an allow-list, and a mark matching the pin is permission.
     for item in items:
         markers = {marker.name for marker in item.own_markers}
         if markers & {"docker", "podman"} and RUNTIME_PIN not in markers:

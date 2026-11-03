@@ -178,6 +178,7 @@ def test_httpbin_demo(temp_dir):
 
 
 @pytest.mark.docker
+@pytest.mark.podman
 def test_fastapi_demo(temp_dir):
     command = [
         "git",
@@ -284,6 +285,7 @@ def test_fastapi_demo(temp_dir):
 
 
 @pytest.mark.docker
+@pytest.mark.podman
 def test_fastapi_demo_deselect_deploy(temp_dir):
     charm_dir = temp_dir / "fastapi-demo-operator"
     command = [

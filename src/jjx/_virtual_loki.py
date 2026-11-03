@@ -73,6 +73,10 @@ def start_loki(
         # to the bridge network already; pass it explicitly so both runtimes
         # land on the shared bridge, where relation peers reach each other.
         network="bridge",
+        # jjx auto-publishes the spec port identity-mapped on rootless
+        # Podman, so the URLs the tests compose from show-proxied-endpoints
+        # (fabricated at 127.0.0.1 there) answer from the host.
+        publish=_engine._rootless_publish([3100]),
         # The image's default command is:
         #   /usr/bin/loki -config.file=/etc/loki/local-config.yaml
         # which starts Loki in single-binary mode with filesystem storage.
