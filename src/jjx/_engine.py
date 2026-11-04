@@ -44,6 +44,11 @@ CHARM_RUNNER_IMAGE = "docker.io/ubuntu/dotnet-deps:8.0-24.04_stable"
 # PR will make this configurable (env var or detection).
 _CONTAINER_BINARY = "docker"
 
+# Address --stable-port publishes on, high in the loopback block to stay
+# clear of services conventions bind on 127.0.0.1. Identity-mapped, so the
+# flag pins the full address: 127.0.0.220:<port>.
+STABLE_PORT_ADDRESS = "127.0.0.220"
+
 
 @dataclass
 class CliError(Exception):

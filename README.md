@@ -97,12 +97,6 @@ The workload stays running until you press Ctrl-C.
 
 The output shows the workload's IP address. You can play with the workload by connecting to this address. If the integration tests interacted with the workload, the output also shows which port to use when connecting to the workload.
 
-Alternatively, to play with the workload on localhost, specify a port mapping:
-
-```text
-uvx jjx -p <localhost-port>:<workload-port>
-```
-
 ### Run the workload in the background
 
 In the charm dir:
