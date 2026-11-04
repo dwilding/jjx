@@ -22,10 +22,12 @@ from typing import Any
 def start_traefik(
     model_name: str,
     app_name: str,
+    host_ip: str | None = None,
 ) -> dict[str, Any]:
     """Register a virtual traefik app (no container needed).
 
-    Returns a dict with the app state fields.
+    Returns a dict with the app state fields. Publishes nothing: traefik
+    keeps no container and needs no host IP.
     """
     return {
         "container_name": "",

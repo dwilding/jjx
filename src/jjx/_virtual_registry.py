@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 # Type aliases for virtual charm functions.
-StartFunc = Callable[[str, str], dict[str, Any]]
+StartFunc = Callable[[str, str, str | None], dict[str, Any]]
 PopulateFunc = Callable[[dict[str, Any], dict[str, Any], str, dict[str, Any]], None]
 
 

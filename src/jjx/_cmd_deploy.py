@@ -28,12 +28,13 @@ _VIRTUAL_CHARMS = {
 }
 
 
-def _stable_port_publish_from_env() -> str | None:
-    """Return the publish spec for a requested --stable-port, or None.
+def _stable_port_from_env() -> int | None:
+    """Return the port --stable-port requested, or None.
 
     The CLI sets ``JJX_STABLE_PORT`` when invoked with --stable-port. The
-    publish is identity-mapped on the fixed loopback address, so the port
-    the tests dial is exactly the workload's port.
+    port publishes identity-mapped on the fixed loopback address
+    ``127.220.0.1``, so the port the tests dial is exactly the workload's
+    port.
     """
     raw = os.environ.get("JJX_STABLE_PORT", "").strip()
     if not raw:
@@ -44,7 +45,30 @@ def _stable_port_publish_from_env() -> str | None:
         raise _engine.CliError(f"JJX_STABLE_PORT is not a port number: {raw!r}") from None
     if not 1 <= port <= 65535:
         raise _engine.CliError(f"JJX_STABLE_PORT port out of range: {port}")
-    return f"{_engine.STABLE_PORT_ADDRESS}:{port}:{port}"
+    return port
+
+
+def _dialed_ports_from_env() -> list[int]:
+    """Return the ports the pre-run scan found in the integration tests.
+
+    The CLI sets ``JJX_PUBLISH_PORTS`` to the union of the ports every test
+    function dials as a literal, so a selection such as ``-k`` does not
+    shrink the publish set.
+    """
+    raw = os.environ.get("JJX_PUBLISH_PORTS", "").strip()
+    if not raw:
+        return []
+    ports: set[int] = set()
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            port = int(part)
+        except ValueError:
+            raise _engine.CliError(f"JJX_PUBLISH_PORTS is not a port list: {raw!r}") from None
+        ports.add(port)
+    return sorted(ports)
 
 
 def _copy_image_pebble_layers(image: str, dest_layers_dir: Path) -> None:
@@ -328,29 +352,68 @@ def deploy(args: list[str], model: str | None) -> int:
         (str(pebble_binary), "/charm/bin/pebble", True),
         (str(jjx_dir), "/jjx", False),
     ]
-    publish = _stable_port_publish_from_env()
-    container_id = _engine._docker_run(
-        image,
-        container_name,
-        mounts=mounts,
-        tmpfs_mounts=["/plan:mode=1777"],
-        publish=publish,
-        env={
-            "PEBBLE": "/jjx/pebble",
-            "PEBBLE_SOCKET": "/jjx/socket",
-            "PYTHONPATH": "/",
-        },
-        user=_workload_user_arg(workload_uid, workload_gid),
-        # The Pebble daemon writes into the shared state directories as the
-        # workload user, so it needs the same group grant as the charm runner.
-        # A root workload is unaffected; root needs no supplemental group.
-        group_add=str(os.getgid()),
-        network="bridge",
-        workdir="/plan",
-        entrypoint="/charm/bin/pebble",
-        command=["run", "--hold", "--create-dirs", "--identities", "/jjx/pebble/identities.yaml"],
-    )
+    publish_ports = _dialed_ports_from_env()
+    stable_port = _stable_port_from_env()
+    if stable_port:
+        publish_ports = sorted(set(publish_ports) | {stable_port})
+
+    # Every dialed port publishes on the app's own loopback IP, identity-
+    # mapped. On a runtime refusal, retry once from the next IP.
+    def _run_workload(ip: str | None) -> str:
+        return _engine._docker_run(
+            image,
+            container_name,
+            mounts=mounts,
+            tmpfs_mounts=["/plan:mode=1777"],
+            host_ip=ip,
+            publish_ports=publish_ports,
+            env={
+                "PEBBLE": "/jjx/pebble",
+                "PEBBLE_SOCKET": "/jjx/socket",
+                "PYTHONPATH": "/",
+            },
+            user=_workload_user_arg(workload_uid, workload_gid),
+            # The Pebble daemon writes into the shared state directories as the
+            # workload user, so it needs the same group grant as the charm runner.
+            # A root workload is unaffected; root needs no supplemental group.
+            group_add=str(os.getgid()),
+            network="bridge",
+            workdir="/plan",
+            entrypoint="/charm/bin/pebble",
+            command=[
+                "run",
+                "--hold",
+                "--create-dirs",
+                "--identities",
+                "/jjx/pebble/identities.yaml",
+            ],
+        )
+
+    if not publish_ports:
+        host_ip = None
+        container_id = _run_workload(None)
+    elif stable_port:
+        host_ip = _engine._stable_host_ip(state, publish_ports)
+        container_id = _run_workload(host_ip)
+    else:
+        host_ip = _engine._allocate_host_ip(state, publish_ports)
+        try:
+            container_id = _run_workload(host_ip)
+        except _engine.CliError as exc:
+            if not _engine._publish_refused(exc):
+                raise
+            # The runtime refused the IP after the probe passed: resume the
+            # scan from the next IP and retry once. The refused run leaves a
+            # created container behind, so remove it before the retry. A
+            # second refusal raises, reporting the runtime's message.
+            _engine._docker_rm(container_name)
+            host_ip = _engine._allocate_host_ip(
+                state, publish_ports, start=_engine._ip_after(host_ip)
+            )
+            container_id = _run_workload(host_ip)
+
     model_state["apps"][app_name]["container_id"] = container_id
+    model_state["apps"][app_name]["host_ip"] = host_ip
     # Store the workload container's IP address in state so hook tools
     # (e.g. network-get) can access it without calling docker directly,
     # which isn't available inside the charm runner container.
@@ -414,7 +477,12 @@ def _deploy_virtual(
         raise _engine.CliError(f"unknown virtual charm kind: {virtual_kind}")
 
     model_state = state["models"][model_name]
-    info = spec.start(model_name, app_name)
+    # Allocate a host IP before starting: the app's port publishes on it.
+    ports = [spec.default_port] if spec.default_port else []
+    host_ip = None
+    if ports:
+        host_ip = _engine._allocate_host_ip(state, ports)
+    info = spec.start(model_name, app_name, host_ip)
     model_state["apps"][app_name] = _virtual_registry.make_app_state(virtual_kind, app_name, info)
     _engine._append_log(
         model_state,

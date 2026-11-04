@@ -7,11 +7,13 @@ from __future__ import annotations
 
 import glob
 import io
+import ipaddress
 import json
 import os
 import re
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import tarfile
@@ -44,9 +46,16 @@ CHARM_RUNNER_IMAGE = "docker.io/ubuntu/dotnet-deps:8.0-24.04_stable"
 # PR will make this configurable (env var or detection).
 _CONTAINER_BINARY = "docker"
 
-# Fixed address --stable-port publishes on, identity-mapped:
-# 127.0.0.220:<port>.
-STABLE_PORT_ADDRESS = "127.0.0.220"
+# 127.220.x is jjx's loopback namespace: the digits echo the name, and
+# nothing else claims the street. The .0 rack is reserved: --stable-port
+# pins to the fixed address below, and later PRs can reserve more fixed
+# plots after it (for example 127.220.0.2). App allocations scan the .1
+# rack upward.
+STABLE_PORT_ADDRESS = "127.220.0.1"
+
+# The loopback range an app's host IP allocates from, scanned upward.
+ALLOCATION_START_ADDRESS = "127.220.1.1"
+ALLOCATION_LAST_ADDRESS = "127.220.1.254"
 
 
 @dataclass
@@ -136,7 +145,7 @@ def _save_state(state: dict[str, Any]) -> None:
 
 
 def _write_gitignore_atomic() -> None:
-    """Write .jjx/.gitignore via temp-file + rename.
+    """Write .jjx/.gitignore using temp-file + rename.
 
     In-place rewrite breaks once a container-side save has made the file
     root/170-owned: the host's next in-place write fails at any umask. The
@@ -147,6 +156,110 @@ def _write_gitignore_atomic() -> None:
     tmp_path.write_text("*\n", encoding="utf-8")
     os.chmod(tmp_path, 0o644)
     os.replace(tmp_path, _gitignore_path())
+
+
+def _first_busy_port(ip: str, ports: list[int]) -> int | None:
+    """Return the first port the ip cannot bind, or None when all bind.
+
+    The container runtime binds a real host socket for each published port,
+    so a bind failure here predicts the refusal the runtime would report.
+    An empty ports list binds nothing and is always free.
+    """
+    for port in sorted(set(ports)):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                sock.bind((ip, port))
+        except OSError:
+            return port
+    return None
+
+
+def _claimed_host_ips(state: dict[str, Any]) -> set[str]:
+    """Return the host IPs running apps hold, in any model.
+
+    A workload records its host IP at app level. A virtual charm records it
+    inside the info dict its spec chooses.
+    """
+    claimed: set[str] = set()
+    from . import _virtual_registry
+
+    for model in state.get("models", {}).values():
+        for app in model.get("apps", {}).values():
+            ip = app.get("host_ip")
+            if ip:
+                claimed.add(ip)
+                continue
+            kind = app.get("virtual_kind")
+            if not kind:
+                continue
+            spec = _virtual_registry.get_spec(kind)
+            if spec is None:
+                continue
+            info: dict[str, Any] = app.get(spec.info_key, {})
+            if info.get("host_ip"):
+                claimed.add(info["host_ip"])
+    return claimed
+
+
+def _allocate_host_ip(
+    state: dict[str, Any],
+    ports: list[int],
+    start: str | None = None,
+) -> str:
+    """Return the first loopback IP at or after start that can take ports.
+
+    Skips the IPs running apps hold and probes the rest upward for one that
+    binds every port. start defaults to ALLOCATION_START_ADDRESS. A retry
+    passes the IP after the one the runtime refused.
+    """
+    claimed = _claimed_host_ips(state)
+    first = ipaddress.IPv4Address(start or ALLOCATION_START_ADDRESS)
+    last = ipaddress.IPv4Address(ALLOCATION_LAST_ADDRESS)
+    if first > last:
+        raise CliError(f"Error: allocation start {start} is past {ALLOCATION_LAST_ADDRESS}.")
+    candidate = first
+    while candidate <= last:
+        ip = str(candidate)
+        if ip not in claimed and _first_busy_port(ip, ports) is None:
+            return ip
+        candidate += 1
+    raise CliError(
+        f"Error: no free host IP from {first} to {last} for ports {sorted(set(ports))}."
+    )
+
+
+def _stable_host_ip(state: dict[str, Any], ports: list[int]) -> str:
+    """Return STABLE_PORT_ADDRESS, or raise when a port on it is busy.
+
+    --stable-port pins the address, so a busy port is an error, not a reason
+    to scan upward.
+    """
+    ip = STABLE_PORT_ADDRESS
+    if ip in _claimed_host_ips(state):
+        raise CliError(f"Error: {ip} is already held by a running app.")
+    busy = _first_busy_port(ip, ports)
+    if busy is not None:
+        raise CliError(f"Error: {ip} cannot bind port {busy}, already in use.")
+    return ip
+
+
+def _ip_after(ip: str) -> str:
+    """Return the loopback IP one slot after ip."""
+    return str(ipaddress.IPv4Address(ip) + 1)
+
+
+def _publish_refused(exc: CliError) -> bool:
+    """Return True when the runtime refused to bind a published port."""
+    text = exc.message.lower()
+    return any(
+        marker in text
+        for marker in (
+            "port is already allocated",
+            "address already in use",
+            "driver failed programming external connectivity",
+        )
+    )
 
 
 def _prepare_shared_dirs(workload_name: str | None = None) -> None:
@@ -546,7 +659,8 @@ def _docker_run(
     container_name: str,
     mounts: list[tuple[str, str, bool]] | None = None,
     tmpfs_mounts: list[str] | None = None,
-    publish: str | None = None,
+    host_ip: str | None = None,
+    publish_ports: list[int] | None = None,
     env: dict[str, str] | None = None,
     user: str | None = None,
     workdir: str | None = None,
@@ -571,8 +685,9 @@ def _docker_run(
     if group_add:
         cmd.extend(["--group-add", group_add])
 
-    if publish:
-        cmd.extend(["--publish", publish])
+    if host_ip:
+        for port in sorted(publish_ports or []):
+            cmd.extend(["--publish", f"{host_ip}:{port}:{port}"])
 
     for src, dst, read_only in mounts or []:
         mode = "ro" if read_only else "rw"

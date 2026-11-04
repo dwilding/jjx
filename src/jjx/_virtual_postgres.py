@@ -76,6 +76,7 @@ def _wait_for_postgres(container_name: str, timeout: float = 60.0) -> None:
 def start_postgres_wrapper(
     model_name: str,
     app_name: str,
+    host_ip: str | None = None,
 ) -> dict[str, Any]:
     """Wrapper matching the standard StartFunc signature.
 
@@ -83,7 +84,8 @@ def start_postgres_wrapper(
     database. The per-relation database is created lazily by
     :func:`populate_relation`, using the name the requirer requests (or, as a
     fallback, the requirer's app name — matching ``paas_charm``'s convention of
-    ``database_name=self.app.name``).
+    ``database_name=self.app.name``). Publishes nothing: postgres serves the
+    workload over the container network, so it needs no host IP.
     """
     return start_postgres(model_name, app_name)
 

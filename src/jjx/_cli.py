@@ -537,9 +537,11 @@ def jjx_cli() -> int:
     # finally below.
     junit_path: Path | None = None
     junit_owned = False
-    tests_dir: Path | None = None
+    # The deploy path publishes the union of every dialed literal, so the
+    # tests_dir scan runs even with --stable-port. The flag's port joins
+    # the union.
+    tests_dir = _test_dir_from_args(pytest_args, charm_root)
     if not stable_port:
-        tests_dir = _test_dir_from_args(pytest_args, charm_root)
         junit_path = _junit_path_from_args(pytest_args, charm_root)
     if not stable_port and junit_path is None and not _has_junit_arg(pytest_args):
         junit_path = charm_root / _engine.STATE_DIR_NAME / "junit.xml"
@@ -557,6 +559,9 @@ def jjx_cli() -> int:
     # at the launcher's venv; if inherited, uv may reuse it instead of creating
     # one in the charm dir, causing pytest to run from the wrong project root.
     env.pop("VIRTUAL_ENV", None)
+    if tests_dir:
+        union = set().union(*_port_scan.scan_test_ports(tests_dir).values())
+        env["JJX_PUBLISH_PORTS"] = ",".join(str(port) for port in sorted(union))
     if stable_port:
         env["JJX_STABLE_PORT"] = str(stable_port)
     cmd = [
