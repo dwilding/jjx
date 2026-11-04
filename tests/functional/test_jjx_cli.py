@@ -75,12 +75,10 @@ def test_uvx_jjx(k8s_2_configurable):
         container_name = f"{model_name}-test-charm-demo-server"
         operator_container_name = f"{model_name}-test-charm-operator"
         status_line = wait_for_output_line(proc, "Workload running at ")
-        _, _, container_ip = status_line.partition("Workload running at ")
-        assert container_ip
-        # The charm's integration tests don't dial the workload, so port detection falls
-        # back to IP only. The positive case is in test_golden_charms::test_fastapi_demo.
-        assert ":" not in container_ip
-        assert_connection(f"http://{container_ip}:8000")
+        _, _, workload_address = status_line.partition("Workload running at ")
+        # The charm's integration tests dial the workload, so a port should be detected.
+        assert workload_address.endswith(":8000")
+        assert_connection(f"http://{workload_address}")
         assert_no_connection("http://127.0.0.1:8000")
         assert not (k8s_2_configurable / "placeholder.charm").exists()
         assert_no_jjx_in_charm_venv(k8s_2_configurable)

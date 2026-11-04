@@ -18,8 +18,10 @@
 # pytest-jubilant provides a module-scoped `juju` fixture that creates a temporary Juju model.
 # The `charm` fixture is defined in conftest.py.
 
+import json
 import logging
 import pathlib
+import urllib.request
 
 import jubilant
 import pytest
@@ -45,3 +47,10 @@ def test_workload_version_is_set(charm: pathlib.Path, juju: jubilant.Juju):
     """Verify that the workload version has been set."""
     expected_version = "2.1.0"  # Hardcoded for simplicity.
     juju.wait(lambda status: status.apps[APP_NAME].version == expected_version)
+
+
+def test_workload(charm: pathlib.Path, juju: jubilant.Juju):
+    """Verify that the workload can be reached over HTTP."""
+    unit_address = juju.status().apps[APP_NAME].units[f"{APP_NAME}/0"].address
+    response = urllib.request.urlopen(f"http://{unit_address}:8000/version", timeout=2)
+    assert json.loads(response.read())["version"] == "2.1.0"  # Hardcoded for simplicity.
