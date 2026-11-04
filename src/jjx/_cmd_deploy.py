@@ -7,7 +7,6 @@ place, while external imports of ``jjx._cmd_deploy`` remain stable.
 from __future__ import annotations
 
 import os
-import re
 import subprocess
 import uuid
 from pathlib import Path
@@ -29,27 +28,23 @@ _VIRTUAL_CHARMS = {
 }
 
 
-_PUBLISH_RE = re.compile(r"^(?P<host_port>\d{1,5}):(?P<container_port>\d{1,5})$")
+def _stable_port_publish_from_env() -> str | None:
+    """Return the publish spec for a requested --stable-port, or None.
 
-
-def _parse_publish(raw: str) -> str:
-    match = _PUBLISH_RE.fullmatch(raw)
-    if not match:
-        raise _engine.CliError("JJX_PUBLISH must be in HOST_PORT:CONTAINER_PORT format")
-
-    host_port = int(match.group("host_port"))
-    container_port = int(match.group("container_port"))
-    if not (1 <= host_port <= 65535 and 1 <= container_port <= 65535):
-        raise _engine.CliError("JJX_PUBLISH ports must be between 1 and 65535")
-
-    return f"127.0.0.1:{host_port}:{container_port}"
-
-
-def _publish_from_env() -> str | None:
-    raw = os.environ.get("JJX_PUBLISH", "").strip()
+    The CLI sets ``JJX_STABLE_PORT`` when invoked with --stable-port. The
+    publish is identity-mapped on the fixed loopback address, so the port
+    the tests dial is exactly the workload's port.
+    """
+    raw = os.environ.get("JJX_STABLE_PORT", "").strip()
     if not raw:
         return None
-    return _parse_publish(raw)
+    try:
+        port = int(raw)
+    except ValueError:
+        raise _engine.CliError(f"JJX_STABLE_PORT is not a port number: {raw!r}") from None
+    if not 1 <= port <= 65535:
+        raise _engine.CliError(f"JJX_STABLE_PORT port out of range: {port}")
+    return f"{_engine.STABLE_PORT_ADDRESS}:{port}:{port}"
 
 
 def _copy_image_pebble_layers(image: str, dest_layers_dir: Path) -> None:
@@ -333,7 +328,7 @@ def deploy(args: list[str], model: str | None) -> int:
         (str(pebble_binary), "/charm/bin/pebble", True),
         (str(jjx_dir), "/jjx", False),
     ]
-    publish = _publish_from_env()
+    publish = _stable_port_publish_from_env()
     container_id = _engine._docker_run(
         image,
         container_name,

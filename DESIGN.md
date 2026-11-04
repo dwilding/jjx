@@ -14,7 +14,7 @@ jjx down     # tear down all models and remove runtime state
 
 Optional flags:
 
-- `-p HOST:CONTAINER` — publish a container port to `127.0.0.1:HOST`
+- `--stable-port <port>` — publish the workload's `<port>` on `127.0.0.220:<port>`, so tests get a predictable address. The flag bypasses port detection.
 
 When a run leaves the workload running, `jjx` prints its address as `Workload running at <ip>:<port>`. The port comes from the last passing test that dialed a port literal, cross-referencing two inputs:
 
@@ -25,7 +25,7 @@ Each port the winning test dialed prints one line. The report is a file rather t
 
 The deliberate misses, each a silent degrade to the IP-only line (`Workload running at <ip>`): a port computed by a helper, a port that only exists at runtime (`test_loki_data` builds its URL from the output of `show-proxied-endpoints`), and a run where no passing test dialed any literal.
 
-`-p` means the user chose the port themselves, so `jjx` skips the scan, the JUnit argument, and the report read. A detected port printed alongside would name a container-IP endpoint that `-p` never published. Filtering it against the publish mapping would be a cross-check, which jjx does not do.
+`--stable-port` bypasses the scan, the JUnit argument, and the report read, and prints `Workload running at 127.0.0.220:<port>`. Without the flag, `jjx` prints the address port detection produced.
 
 jjx reads only what the tests did. It performs no check of its own against the workload. A passing test whose dial would fail is a test bug. So is a stale verdict: when a test reconfigures the port and no later passing test dials the new one, the line reports the old port — a bug in the tests, exposed for the charm author to fix. Reporting the tests' verdict, including a stale one, is the feature.
 
@@ -240,7 +240,7 @@ Deploy flow:
 4. pre-pull the workload image with retry (see "image pull retries" below), then start workload container and Pebble with explicit `--network bridge` (no host networking)
    - Pebble is started with `run --hold --create-dirs --identities /jjx/pebble/identities.yaml` so baked-in layers (e.g. Rockcraft layers with `startup: enabled`) do not autostart services before the charm's pebble-ready hook fires — matching real Juju, which also uses `--hold`. The identities file grants UID 170 admin access (see "container users" above).
    - the workload container runs with `--user <uid>:<gid>` when the charm declares them, otherwise at the image's declared user, or root if the image declares none
-   - if `JJX_PUBLISH` is set to `HOST_PORT:CONTAINER_PORT`, add port publish `127.0.0.1:HOST_PORT:CONTAINER_PORT`
+   - if `JJX_STABLE_PORT` is set (the CLI set it from `--stable-port`), add port publish `127.0.0.220:<port>:<port>`, identity-mapped
    - the workload container's IP is stored in `state.json` as `container_ip` so hook tools (e.g. `network-get`) can access it without calling Docker directly
 5. start charm runner container (`--network=container:<workload>`, running as `170:170`, bind-mounts for Python, venv, jjx source, charm dir, state dir) — its image is pre-pulled the same way
 6. wait for Pebble socket (`/jjx/socket`) to be connectable inside charm runner

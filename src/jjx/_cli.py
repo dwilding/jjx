@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import re
 import shutil
 import signal
 import subprocess
@@ -220,8 +219,9 @@ def jjx_pytest_env_args(charm_root: Path) -> list[str]:
 def _split_cli_args(argv: list[str]) -> tuple[list[str], list[str]]:
     """Split argv into jjx options and extra pytest args at the ``--`` separator.
 
-    Everything before ``--`` is jjx's own flags (``-d``, ``-p``, ``down``).
-    Everything after ``--`` is passed through as extra pytest arguments.
+    Everything before ``--`` is jjx's own flags (``-d``, ``--stable-port``,
+    ``down``). Everything after ``--`` is passed through as extra pytest
+    arguments.
     """
     if "--" in argv:
         idx = argv.index("--")
@@ -500,17 +500,19 @@ def jjx_cli() -> int:
 
     detach = "-d" in jjx_args
 
-    # Extract -p flag for port publishing.
-    publish = None
-    if "-p" in jjx_args:
-        idx = jjx_args.index("-p")
-        if idx + 1 < len(jjx_args):
-            publish = jjx_args[idx + 1]
-            if not re.match(r"^\d+:\d+$", publish):
-                sys.stderr.write(
-                    f"Error: Invalid port format '{publish}': expected <number>:<number>.\n"
-                )
+    # Extract --stable-port flag: publish the workload's port on a fixed
+    # loopback address, so tests get a predictable address.
+    stable_port = None
+    if "--stable-port" in jjx_args:
+        idx = jjx_args.index("--stable-port")
+        if idx + 1 < len(jjx_args) and jjx_args[idx + 1].isdigit():
+            stable_port = int(jjx_args[idx + 1])
+            if not 1 <= stable_port <= 65535:
+                sys.stderr.write(f"Error: Invalid port '{jjx_args[idx + 1]}': expected 1-65535.\n")
                 return 2
+        else:
+            sys.stderr.write("Error: --stable-port expects a port number.\n")
+            return 2
 
     try:
         pytest_args = jjx_pytest_args(charm_root, cli_pytest_args)
@@ -528,22 +530,22 @@ def jjx_cli() -> int:
 
     # Port detection reads the integration tests for dialed port literals and
     # cross-references them against the JUnit report pytest writes during the
-    # run. -p publishes a port of the user's choosing, so detection is skipped
-    # entirely. A report path already in the args wins and is never removed —
-    # including a dangling flag naming no path, which pytest itself rejects as
-    # it would without jjx. Otherwise jjx appends its own report path under
-    # .jjx/ and removes it in the finally below.
+    # run. --stable-port bypasses detection. A report path already in the
+    # args wins and is never removed — including a dangling flag naming no
+    # path, which pytest itself rejects as it would without jjx. Otherwise
+    # jjx appends its own report path under .jjx/ and removes it in the
+    # finally below.
     junit_path: Path | None = None
     junit_owned = False
     tests_dir: Path | None = None
-    if not publish:
+    if not stable_port:
         tests_dir = _test_dir_from_args(pytest_args, charm_root)
         junit_path = _junit_path_from_args(pytest_args, charm_root)
-        if junit_path is None and not _has_junit_arg(pytest_args):
-            junit_path = charm_root / _engine.STATE_DIR_NAME / "junit.xml"
-            junit_path.parent.mkdir(parents=True, exist_ok=True)
-            pytest_args.append(f"--junit-xml={junit_path}")
-            junit_owned = True
+    if not stable_port and junit_path is None and not _has_junit_arg(pytest_args):
+        junit_path = charm_root / _engine.STATE_DIR_NAME / "junit.xml"
+        junit_path.parent.mkdir(parents=True, exist_ok=True)
+        pytest_args.append(f"--junit-xml={junit_path}")
+        junit_owned = True
 
     placeholder_charm = charm_root / "placeholder.charm"
     placeholder_charm.touch()
@@ -555,9 +557,8 @@ def jjx_cli() -> int:
     # at the launcher's venv; if inherited, uv may reuse it instead of creating
     # one in the charm dir, causing pytest to run from the wrong project root.
     env.pop("VIRTUAL_ENV", None)
-    if publish:
-        env["JJX_PUBLISH"] = publish
-        external_port, _ = publish.split(":", 1)
+    if stable_port:
+        env["JJX_STABLE_PORT"] = str(stable_port)
     cmd = [
         "uv",
         "run",
@@ -582,12 +583,15 @@ def jjx_cli() -> int:
             print()  # separate the teardown output from the test report
             teardown_all_models()
             return returncode
-        if publish:
-            print(f"\nWorkload running at 127.0.0.1:{external_port}", flush=True)
+        if stable_port:
+            print(
+                f"\nWorkload running at {_engine.STABLE_PORT_ADDRESS}:{stable_port}",
+                flush=True,
+            )
         else:
             # The ports dialed by the last passing test that dialed any
-            # literal, read from the tests' ASTs and the JUnit report. Nothing
-            # detectable: today's IP-only line, byte for byte.
+            # literal, read from the tests' ASTs and the JUnit report.
+            # Nothing detectable: today's IP-only line, byte for byte.
             ports = _port_scan.detected_ports(tests_dir, junit_path)
             if ports:
                 print(flush=True)

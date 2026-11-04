@@ -99,14 +99,14 @@ def test_uvx_jjx(k8s_2_configurable):
             proc.kill()
 
 
-def test_uvx_jjx_publish(k8s_2_configurable):
+def test_uvx_jjx_stable_port(k8s_2_configurable):
     command = [
         "uvx",
         "--with-editable",
         PACKAGE_DIR,
         "jjx",
-        "-p",
-        "8135:8000",
+        "--stable-port",
+        "8000",
     ]
     proc = subprocess.Popen(
         command,
@@ -117,8 +117,8 @@ def test_uvx_jjx_publish(k8s_2_configurable):
         text=True,
     )
     try:
-        wait_for_output_line(proc, "Workload running at 127.0.0.1:8135")
-        assert_connection("http://127.0.0.1:8135")
+        wait_for_output_line(proc, "Workload running at 127.0.0.220:8000")
+        assert_connection("http://127.0.0.220:8000")
         # TEARDOWN
         proc.send_signal(signal.SIGINT)
         assert proc.wait(timeout=30) == 130
