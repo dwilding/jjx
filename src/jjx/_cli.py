@@ -219,8 +219,9 @@ def jjx_pytest_env_args(charm_root: Path) -> list[str]:
 def _split_cli_args(argv: list[str]) -> tuple[list[str], list[str]]:
     """Split argv into jjx options and extra pytest args at the ``--`` separator.
 
-    Everything before ``--`` is jjx's own flags (``-d``, ``down``).
-    Everything after ``--`` is passed through as extra pytest arguments.
+    Everything before ``--`` is jjx's own flags (``-d``, ``--stable-port``,
+    ``down``). Everything after ``--`` is passed through as extra pytest
+    arguments.
     """
     if "--" in argv:
         idx = argv.index("--")
