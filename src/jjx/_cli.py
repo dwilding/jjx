@@ -499,11 +499,8 @@ def jjx_cli() -> int:
 
     detach = "-d" in jjx_args
 
-    # Extract --stable-port flag: publish a workload port on a fixed
-    # loopback address, for runs whose tests or CI need a predictable
-    # endpoint outside jjx's printed output. The name is deliberately
-    # long: the printed address is the intended interface for humans and
-    # scripts.
+    # Extract --stable-port flag: publish the workload's port on a fixed
+    # loopback address, so tests get a predictable address.
     stable_port = None
     if "--stable-port" in jjx_args:
         idx = jjx_args.index("--stable-port")
@@ -532,11 +529,11 @@ def jjx_cli() -> int:
 
     # Port detection reads the integration tests for dialed port literals and
     # cross-references them against the JUnit report pytest writes during the
-    # run. --stable-port publishes a port of the user's choosing, so
-    # detection is skipped entirely. A report path already in the args wins
-    # and is never removed — including a dangling flag naming no path, which
-    # pytest itself rejects as it would without jjx. Otherwise jjx appends
-    # its own report path under .jjx/ and removes it in the finally below.
+    # run. --stable-port bypasses detection. A report path already in the
+    # args wins and is never removed — including a dangling flag naming no
+    # path, which pytest itself rejects as it would without jjx. Otherwise
+    # jjx appends its own report path under .jjx/ and removes it in the
+    # finally below.
     junit_path: Path | None = None
     junit_owned = False
     tests_dir: Path | None = None

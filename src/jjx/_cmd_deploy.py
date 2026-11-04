@@ -33,7 +33,7 @@ def _stable_port_publish_from_env() -> str | None:
 
     The CLI sets ``JJX_STABLE_PORT`` when invoked with --stable-port. The
     publish is identity-mapped on the fixed loopback address, so the port
-    the tests or CI dial is exactly the workload's port.
+    the tests dial is exactly the workload's port.
     """
     raw = os.environ.get("JJX_STABLE_PORT", "").strip()
     if not raw:

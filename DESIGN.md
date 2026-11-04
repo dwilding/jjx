@@ -14,7 +14,7 @@ jjx down     # tear down all models and remove runtime state
 
 Optional flags:
 
-- `--stable-port <port>` — publish the workload's `<port>` on `127.0.0.220:<port>`. For runs whose tests or CI need a predictable endpoint outside jjx's printed output. Skipping detection is part of the semantics: the user published a port of their own choosing, so the printed port would name an endpoint Detection never saw.
+- `--stable-port <port>` — publish the workload's `<port>` on `127.0.0.220:<port>`, so tests get a predictable address. The flag bypasses port detection.
 
 When a run leaves the workload running, `jjx` prints its address as `Workload running at <ip>:<port>`. The port comes from the last passing test that dialed a port literal, cross-referencing two inputs:
 
@@ -25,7 +25,7 @@ Each port the winning test dialed prints one line. The report is a file rather t
 
 The deliberate misses, each a silent degrade to the IP-only line (`Workload running at <ip>`): a port computed by a helper, a port that only exists at runtime (`test_loki_data` builds its URL from the output of `show-proxied-endpoints`), and a run where no passing test dialed any literal.
 
-`--stable-port` means the user chose the port themselves, so `jjx` skips the scan, the JUnit argument, and the report read — and prints `Workload running at 127.0.0.220:<port>` instead of an address Detection produced. The flag publishes identity-mapped on a fixed loopback address, high in the loopback block to stay clear of what conventions bind on `127.0.0.1`; CI can rely on it, and a future address plan (a published set driven by the scan) will not displace it. The name is deliberately long, because the printed address is the intended interface.
+`--stable-port` bypasses the scan, the JUnit argument, and the report read, and prints `Workload running at 127.0.0.220:<port>`. Without the flag, `jjx` prints the address port detection produced.
 
 jjx reads only what the tests did. It performs no check of its own against the workload. A passing test whose dial would fail is a test bug. So is a stale verdict: when a test reconfigures the port and no later passing test dials the new one, the line reports the old port — a bug in the tests, exposed for the charm author to fix. Reporting the tests' verdict, including a stale one, is the feature.
 
