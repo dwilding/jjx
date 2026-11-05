@@ -5,6 +5,7 @@ This module implements the minimal Juju-like behavior described in DESIGN.md.
 
 from __future__ import annotations
 
+import errno
 import glob
 import io
 import ipaddress
@@ -163,14 +164,18 @@ def _first_busy_port(ip: str, ports: list[int]) -> int | None:
 
     The container runtime binds a real host socket for each published port,
     so a bind failure here predicts the refusal the runtime would report.
-    An empty ports list binds nothing and is always free.
+    An empty ports list binds nothing and is always free. A bind the OS
+    refuses for privilege (EACCES, EPERM) is not busy: the runtime's
+    daemon holds the privilege jjx lacks, so the port stays a candidate.
     """
     for port in sorted(set(ports)):
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 sock.bind((ip, port))
-        except OSError:
+        except OSError as exc:
+            if exc.errno in (errno.EACCES, errno.EPERM):
+                continue
             return port
     return None
 
