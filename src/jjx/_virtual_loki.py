@@ -60,10 +60,12 @@ def _wait_for_loki(container_name: str, timeout: float = 60.0) -> None:
 def start_loki(
     model_name: str,
     app_name: str,
+    host_ip: str | None = None,
 ) -> dict[str, Any]:
     """Start a Loki container and return provider state.
 
-    Returns a dict with keys: container_name, container_id, ip_address, host, port.
+    Returns a dict with keys: container_name, container_id, ip_address, host,
+    host_ip, port.
 
     The Loki Docker image ships with a built-in default config at
     ``/etc/loki/local-config.yaml`` that runs Loki in single-binary mode with
@@ -83,6 +85,8 @@ def start_loki(
         #   /usr/bin/loki -config.file=/etc/loki/local-config.yaml
         # which starts Loki in single-binary mode with filesystem storage.
         # No custom config or command is needed.
+        host_ip=host_ip,
+        publish_ports=[LOKI_PORT],
     )
 
     _wait_for_loki(container_name)
@@ -96,6 +100,7 @@ def start_loki(
         "container_id": container_id,
         "ip_address": details.ip_address,
         "host": details.ip_address,
+        "host_ip": host_ip,
         "port": LOKI_PORT,
     }
 

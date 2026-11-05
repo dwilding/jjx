@@ -54,10 +54,12 @@ def _wait_for_prometheus(container_name: str, timeout: float = 60.0) -> None:
 def start_prometheus(
     model_name: str,
     app_name: str,
+    host_ip: str | None = None,
 ) -> dict[str, Any]:
     """Start a Prometheus container and return provider state.
 
-    Returns a dict with keys: container_name, container_id, ip_address, host, port.
+    Returns a dict with keys: container_name, container_id, ip_address, host,
+    host_ip, port.
     """
     container_name = _engine._sanitize_container_name(f"{model_name}-{app_name}")
 
@@ -83,6 +85,8 @@ def start_prometheus(
     container_id = _engine._docker_run(
         PROMETHEUS_IMAGE,
         container_name,
+        host_ip=host_ip,
+        publish_ports=[PROMETHEUS_PORT],
         mounts=[(str(config_dir), "/etc/prometheus", False)],
         tmpfs_mounts=["/prometheus:mode=1777"],
         command=[
@@ -103,6 +107,7 @@ def start_prometheus(
         "container_id": container_id,
         "ip_address": details.ip_address,
         "host": details.ip_address,
+        "host_ip": host_ip,
         "port": PROMETHEUS_PORT,
         "config_dir": str(config_dir),
     }

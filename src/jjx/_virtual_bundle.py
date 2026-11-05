@@ -53,7 +53,11 @@ def deploy_bundle(
         spec = _virtual_registry.get_spec(virtual_kind)
         if spec is None:
             raise _engine.CliError(f"unknown virtual kind in bundle: {virtual_kind}")
-        info = spec.start(model_name, app_name)
+        # Allocate a host IP before starting: the app's port publishes on it,
+        # and the components already started hold claims the next skips.
+        ports = [spec.default_port] if spec.default_port else []
+        host_ip = _engine._allocate_host_ip(state, ports) if ports else None
+        info = spec.start(model_name, app_name, host_ip)
         model_state["apps"][app_name] = _virtual_registry.make_app_state(
             virtual_kind, app_name, info
         )

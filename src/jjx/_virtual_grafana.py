@@ -52,10 +52,12 @@ def _wait_for_grafana(container_name: str, timeout: float = 60.0) -> None:
 def start_grafana(
     model_name: str,
     app_name: str,
+    host_ip: str | None = None,
 ) -> dict[str, Any]:
     """Start a Grafana container and return provider state.
 
-    Returns a dict with keys: container_name, container_id, ip_address, host, port.
+    Returns a dict with keys: container_name, container_id, ip_address, host,
+    host_ip, port.
 
     Grafana is provisioned with datasources and dashboards via files mounted
     into ``/etc/grafana/provisioning/``. The datasource and dashboard configs
@@ -87,6 +89,8 @@ def start_grafana(
     container_id = _engine._docker_run(
         GRAFANA_IMAGE,
         container_name,
+        host_ip=host_ip,
+        publish_ports=[GRAFANA_PORT],
         mounts=[(str(provisioning_dir), "/etc/grafana/provisioning", False)],
         env={
             "GF_SECURITY_ADMIN_USER": "admin",
@@ -107,6 +111,7 @@ def start_grafana(
         "container_id": container_id,
         "ip_address": details.ip_address,
         "host": details.ip_address,
+        "host_ip": host_ip,
         "port": GRAFANA_PORT,
         "provisioning_dir": str(provisioning_dir),
     }

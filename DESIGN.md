@@ -14,7 +14,7 @@ jjx down     # tear down all models and remove runtime state
 
 Optional flags:
 
-- `--stable-port <port>` — publish the workload's `<port>` on `127.0.0.220:<port>`, so tests get a predictable address. The flag bypasses port detection.
+- `--stable-port <port>` — publish the workload's `<port>` on `127.220.0.1:<port>`, so tests get a predictable address. The flag pins the workload's host IP to `127.220.0.1`.
 
 When a run leaves the workload running, `jjx` prints its address as `Workload running at <ip>:<port>`. The port comes from the last passing test that dialed a port literal, cross-referencing two inputs:
 
@@ -25,7 +25,7 @@ Each port the winning test dialed prints one line. The report is a file rather t
 
 The deliberate misses, each a silent degrade to the IP-only line (`Workload running at <ip>`): a port computed by a helper, a port that only exists at runtime (`test_loki_data` builds its URL from the output of `show-proxied-endpoints`), and a run where no passing test dialed any literal.
 
-`--stable-port` bypasses the scan, the JUnit argument, and the report read, and prints `Workload running at 127.0.0.220:<port>`. Without the flag, `jjx` prints the address port detection produced.
+`jjx` sets `JJX_PUBLISH_PORTS` to the union of the ports every test function dials as a literal, so the publish set does not shrink when a selection such as `-k` deselects tests. `--stable-port` bypasses the scan, the JUnit argument, and the report read, and pins the workload's host IP to `127.220.0.1`. Without the flag, `jjx` prints the address port detection produced. jjx publishes on the `127.220.x` loopback namespace: the digits echo the name, and nothing else claims the street. The `.0` rack is reserved; allocations skip the IPs running apps hold, then scan `127.220.1.1` upward, so no two apps share an IP.
 
 jjx reads only what the tests did. It performs no check of its own against the workload. A passing test whose dial would fail is a test bug. So is a stale verdict: when a test reconfigures the port and no later passing test dials the new one, the line reports the old port — a bug in the tests, exposed for the charm author to fix. Reporting the tests' verdict, including a stale one, is the feature.
 
@@ -115,14 +115,14 @@ All virtual charms are registered in a central registry (`_virtual_registry.py`)
 Currently supported:
 
 - `postgresql-k8s` — starts a real PostgreSQL 16 container and provides the `postgresql_client` interface. The database is created lazily at integrate time, using the database name the requirer requests (falling back to the requirer's app name), so charms that request a name other than the default receive credentials for the right database.
-- `loki-k8s` — starts a real Loki container and provides the `loki_push_api` interface. Workload logs flow via real Pebble log-targets.
-- `prometheus-k8s` — starts a real Prometheus container (with `--web.enable-lifecycle` for config reloads) and consumes the `prometheus_scrape` interface. Configures itself from the charm's relation data.
-- `grafana-k8s` — starts a real Grafana container and consumes the `grafana_dashboard` interface. Provisions Prometheus and Loki as datasources (via file-based provisioning, applied with a container restart since Grafana does not re-provision datasources on SIGHUP), imports dashboards from relation data, and injects datasource variables (`${prometheusds}`, `${lokids}`) into imported dashboards so Grafana can resolve the placeholder UIDs — mirroring what the real grafana-k8s charm does.
+- `loki-k8s` — starts a real Loki container and provides the `loki_push_api` interface. Workload logs flow via real Pebble log-targets. Publishes `3100` on its own host IP.
+- `prometheus-k8s` — starts a real Prometheus container (with `--web.enable-lifecycle` for config reloads) and consumes the `prometheus_scrape` interface. Configures itself from the charm's relation data. Publishes `9090` on its own host IP.
+- `grafana-k8s` — starts a real Grafana container and consumes the `grafana_dashboard` interface. Provisions Prometheus and Loki as datasources (via file-based provisioning, applied with a container restart since Grafana does not re-provision datasources on SIGHUP), imports dashboards from relation data, and injects datasource variables (`${prometheusds}`, `${lokids}`) into imported dashboards so Grafana can resolve the placeholder UIDs — mirroring what the real grafana-k8s charm does. Publishes `3000` on its own host IP.
 - `traefik-k8s` — a state-only virtual charm (no container) that responds to the `show-proxied-endpoints` action with the URLs of other COS charms.
 
 Virtual bundles (e.g. `cos-lite`) deploy multiple virtual charms in one `juju deploy` command.
 
-Virtual charm containers are named `<model>-<app>` and are cleaned up on model teardown. The real charm's workload container is named `<model>-<container>` (using the container name from `charmcraft.yaml`, not the app name). Teardown order is determined by each charm's `teardown_priority`: COS containers (grafana=10, prometheus=20, loki=30) are removed first, then postgres (40), workload (50), and charm runners (60).
+Virtual charm containers publish their port on the host IP their deploy allocates (identity-mapped), so an app's claims are recorded the same way a workload's are. Virtual charm containers are named `<model>-<app>` and are cleaned up on model teardown. The real charm's workload container is named `<model>-<container>` (using the container name from `charmcraft.yaml`, not the app name). Teardown order is determined by each charm's `teardown_priority`: COS containers (grafana=10, prometheus=20, loki=30) are removed first, then postgres (40), workload (50), and charm runners (60).
 
 ## runtime model
 
@@ -240,7 +240,7 @@ Deploy flow:
 4. pre-pull the workload image with retry (see "image pull retries" below), then start workload container and Pebble with explicit `--network bridge` (no host networking)
    - Pebble is started with `run --hold --create-dirs --identities /jjx/pebble/identities.yaml` so baked-in layers (e.g. Rockcraft layers with `startup: enabled`) do not autostart services before the charm's pebble-ready hook fires — matching real Juju, which also uses `--hold`. The identities file grants UID 170 admin access (see "container users" above).
    - the workload container runs with `--user <uid>:<gid>` when the charm declares them, otherwise at the image's declared user, or root if the image declares none
-   - if `JJX_STABLE_PORT` is set (the CLI set it from `--stable-port`), add port publish `127.0.0.220:<port>:<port>`, identity-mapped
+   - `JJX_PUBLISH_PORTS` carries the union of the dialed literals; each publishes identity-mapped on the workload's own host IP from `127.220.1.1` upward (per-app IP, state-wide claims), with one retry from the next IP when the runtime refuses the address. `JJX_STABLE_PORT` pins the host IP to `127.220.0.1` and the busy probe becomes the error. The workload records its `host_ip` in `state.json` so the app's claims are visible for the next allocation.
    - the workload container's IP is stored in `state.json` as `container_ip` so hook tools (e.g. `network-get`) can access it without calling Docker directly
 5. start charm runner container (`--network=container:<workload>`, running as `170:170`, bind-mounts for Python, venv, jjx source, charm dir, state dir) — its image is pre-pulled the same way
 6. wait for Pebble socket (`/jjx/socket`) to be connectable inside charm runner
