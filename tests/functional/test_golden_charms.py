@@ -2,6 +2,8 @@ import pathlib
 import re
 import shutil
 import subprocess
+import urllib.error
+import urllib.request
 
 import helpers_functional as helpers
 
@@ -117,6 +119,8 @@ def test_httpbin_demo(temp_dir):
         PACKAGE_DIR,
         "jjx",
         "-d",
+        "--stable-port",  # Because the charm's integration tests don't dial the workload.
+        "80",
     ]
     result = subprocess.run(
         command,
@@ -129,6 +133,7 @@ def test_httpbin_demo(temp_dir):
         assert result.returncode == 0, (
             f"jjx exited with code {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
+        assert "Workload running at 127.220.0.1:80" in result.stdout
         model_name = result.stdout.split("--juju-model ")[1].split()[0]
         container_names = [
             f"{model_name}-test-charm-operator",
@@ -136,6 +141,8 @@ def test_httpbin_demo(temp_dir):
         ]
         for container_name in container_names:
             helpers.assert_container(container_name)
+        with urllib.request.urlopen("http://127.220.0.1/", timeout=2) as response:
+            assert response.status == 200
         # TEARDOWN
         command = [
             "uvx",
@@ -157,6 +164,13 @@ def test_httpbin_demo(temp_dir):
         for container_name in container_names:
             assert f"Removed {container_name}" in result.stdout
             helpers.assert_no_container(container_name)
+        # The published port no longer answers from the host.
+        try:
+            urllib.request.urlopen("http://127.220.0.1/", timeout=2)
+        except urllib.error.URLError:
+            pass
+        else:
+            raise AssertionError("workload still reachable after jjx down")
     finally:
         # Safety net: ensure containers are removed even if an assertion
         # above failed before TEARDOWN completed.
