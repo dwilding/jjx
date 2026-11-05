@@ -29,13 +29,13 @@ jobs:
         working-directory: operator/examples/httpbin-demo
         run: uvx --with git+https://github.com/dwilding/jjx@main jjx -d --stable-port 80
       - name: Check workload
-        run: curl --fail http://127.0.0.220/
+        run: curl --fail http://127.220.0.1/
       - name: Tear down
         working-directory: operator/examples/httpbin-demo
         run: uvx --with git+https://github.com/dwilding/jjx@main jjx down
       - name: Check no workload
         run: |
-          if curl --fail --max-time 2 http://127.0.0.220/; then
+          if curl --fail --max-time 2 http://127.220.0.1/; then
             echo "ERROR: workload is still running after jjx down"
             exit 1
           fi
@@ -86,13 +86,13 @@ jobs:
         working-directory: operator/examples/httpbin-demo
         run: uv run jjx -d --stable-port 80
       - name: Check workload
-        run: curl --fail http://127.0.0.220/
+        run: curl --fail http://127.220.0.1/
       - name: Tear down
         working-directory: operator/examples/httpbin-demo
         run: uv run jjx down
       - name: Check no workload
         run: |
-          if curl --fail --max-time 2 http://127.0.0.220/; then
+          if curl --fail --max-time 2 http://127.220.0.1/; then
             echo "ERROR: workload is still running after jjx down"
             exit 1
           fi
